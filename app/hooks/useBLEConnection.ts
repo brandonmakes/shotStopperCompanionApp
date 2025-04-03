@@ -284,9 +284,10 @@ export const useBLEConnection = () => {
         });
 
         const onScaleStatusListener = BleManager.onDidUpdateValueForCharacteristic(async (args: any) => {
-            if (args.characteristic === config.current.characteristics.SCALE_STATUS) {
-                console.log("scaleStatusListener", args)
-                setSettings(prev => ({ ...prev, scaleStatus: args.value[0] }));
+            if (args["characteristic"].toLowerCase() === config.current.characteristics.SCALE_STATUS.toLowerCase()) {
+                const status = args.value[0] === 1 ? ScaleStatus.CONNECTED : ScaleStatus.DISCONNECTED;
+                console.log("onScaleStatusListener", args, status)
+                setSettings(prev => ({ ...prev, scaleStatus: status }));
             }
         });
 
@@ -301,7 +302,7 @@ export const useBLEConnection = () => {
             onDidUpdateStateListener.remove();
             onScaleStatusListener.remove();
         };
-    }, [config, state.isConnected, state.error]);
+    }, [config, state.isConnected, state.error, state.bluetoothState, connectToDevice]);
 
     useEffect(() => {
         const appStateSubscription = AppState.addEventListener('change', async (nextAppState: AppStateStatus) => {
@@ -418,13 +419,14 @@ export const useBLEConnection = () => {
         }));
 
         if (firmwareVersion > 0) {
-            const [autoTare, momentary, reedSwitch, minShotDuration, maxShotDuration, dripDelay] = await Promise.all([
+            const [autoTare, momentary, reedSwitch, minShotDuration, maxShotDuration, dripDelay, scaleStatus] = await Promise.all([
                 readAutoTare(),
                 readMomentary(),
                 readReedSwitch(),
                 readMinShotDuration(),
                 readMaxShotDuration(),
                 readDripDelay(),
+                readScaleStatus(),
             ]);
             await listenForScaleStatus();
             setSettings(prev => ({
@@ -435,6 +437,7 @@ export const useBLEConnection = () => {
                 minShotDuration,
                 maxShotDuration,
                 dripDelay,
+                scaleStatus,
             }));
         }
     }, []);
@@ -446,18 +449,18 @@ export const useBLEConnection = () => {
     const readAutoTare = useCallback(() => {
         console.log("reading autoTare", config.current.characteristics.AUTO_TARE)
         return readCharacteristic(config.current.characteristics.AUTO_TARE)
-    }, [config.current.characteristics.AUTO_TARE]);
+    }, [readCharacteristic]);
 
     const updateWeightValue = useCallback((value: number) => {
         return updateSetting('weightValue', value, config.current.characteristics.WEIGHT_VALUE)
-    }, []);
+    }, [updateSetting]);
 
     const readWeightValue = useCallback(async () => {
         console.log("reading weightValue", config.current.characteristics.WEIGHT_VALUE)
         const weightValue = await readCharacteristic(config.current.characteristics.WEIGHT_VALUE)
         console.log("weightValue", weightValue)
         return Number(weightValue)
-    }, [config.current.characteristics.WEIGHT_VALUE]);
+    }, [readCharacteristic]);
 
     const updateMomentary = useCallback((value: boolean) => 
         updateSetting('momentary', value, config.current.characteristics.MOMENTARY), []);
@@ -465,7 +468,7 @@ export const useBLEConnection = () => {
     const readMomentary = useCallback(() => {
         console.log("reading momentary", config.current.characteristics.MOMENTARY)
         return readCharacteristic(config.current.characteristics.MOMENTARY)
-    }, [config.current.characteristics.MOMENTARY]);
+    }, [readCharacteristic]);
 
     const updateReedSwitch = useCallback((value: boolean) => 
         updateSetting('reedSwitch', value, config.current.characteristics.REED_SWITCH), []);
@@ -473,7 +476,7 @@ export const useBLEConnection = () => {
     const readReedSwitch = useCallback(() => {
         console.log("reading reedSwitch", config.current.characteristics.REED_SWITCH)
         return readCharacteristic(config.current.characteristics.REED_SWITCH)
-    }, [config.current.characteristics.REED_SWITCH]);
+    }, [readCharacteristic]);
 
     const updateMinShotDuration = useCallback((value: number) => 
         updateSetting('minShotDuration', value, config.current.characteristics.MIN_SHOT_DURATION), []);
@@ -481,7 +484,7 @@ export const useBLEConnection = () => {
     const readMinShotDuration = useCallback(() => {
         console.log("reading minShotDuration", config.current.characteristics.MIN_SHOT_DURATION)
         return readCharacteristic(config.current.characteristics.MIN_SHOT_DURATION)
-    }, [config.current.characteristics.MIN_SHOT_DURATION]);
+    }, [readCharacteristic]);
 
     const updateMaxShotDuration = useCallback((value: number) => 
         updateSetting('maxShotDuration', value, config.current.characteristics.MAX_SHOT_DURATION), []);
@@ -489,7 +492,7 @@ export const useBLEConnection = () => {
     const readMaxShotDuration = useCallback(() => {
         console.log("reading maxShotDuration", config.current.characteristics.MAX_SHOT_DURATION)
         return readCharacteristic(config.current.characteristics.MAX_SHOT_DURATION)
-    }, [config.current.characteristics.MAX_SHOT_DURATION]);
+    }, [readCharacteristic]);
 
     const updateDripDelay = useCallback((value: number) => 
         updateSetting('dripDelay', value, config.current.characteristics.DRIP_DELAY), []);
@@ -497,12 +500,18 @@ export const useBLEConnection = () => {
     const readDripDelay = useCallback(() => {
         console.log("reading dripDelay", config.current.characteristics.DRIP_DELAY)
         return readCharacteristic(config.current.characteristics.DRIP_DELAY)
-    }, [config.current.characteristics.DRIP_DELAY]);
+    }, [readCharacteristic]);
 
     const readFirmwareVersion = useCallback(() => {
         console.log("reading firmwareVersion", config.current.characteristics.FIRMWARE_VERSION)
         return readCharacteristic(config.current.characteristics.FIRMWARE_VERSION, 1)
-    }, [config.current.characteristics.FIRMWARE_VERSION]);
+    }, [readCharacteristic]);
+
+    const readScaleStatus = useCallback(async () => {
+        console.log("reading scaleStatus", config.current.characteristics.SCALE_STATUS)
+        await listenForScaleStatus();
+        return readCharacteristic(config.current.characteristics.SCALE_STATUS, 1)
+    }, [readCharacteristic, listenForScaleStatus]);
 
     const resetToDefaults = useCallback(async () => {
         await writeCharacteristic(config.current.characteristics.WEIGHT_VALUE, 36);
