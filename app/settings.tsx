@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { ActivityIndicator, SafeAreaView, TouchableOpacity, View, StyleSheet, Animated, Text, ScrollView, Switch, Platform } from 'react-native';
+import { ActivityIndicator, SafeAreaView, TouchableOpacity, View, StyleSheet, Animated, Text, ScrollView, Switch, Platform, TextInput, Linking, Keyboard } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { usePathname, useRouter } from 'expo-router';
 import { Easing } from 'react-native-reanimated';
@@ -10,8 +10,11 @@ import { Slider } from 'react-native-awesome-slider';
 import { useSharedValue } from 'react-native-reanimated';
 import { useBLEConnectionContext } from './contexts/BLEConnectionContext';
 import useDebounce from './hooks/useDebounce';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import DemoMode from './components/DemoMode';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import BottomSheet, { BottomSheetBackdrop, BottomSheetView } from '@gorhom/bottom-sheet';
+import OTAWizard from './settings/otaWizard';
 
 interface SettingsItemProps {
     title: string;
@@ -19,34 +22,41 @@ interface SettingsItemProps {
     isActive: boolean;
     onToggle: () => void;
     showDivider?: boolean;
+    showChevron?: boolean;
 }
 
-const SettingsItem: React.FC<SettingsItemProps> = ({ title, description, isActive, onToggle, showDivider = true }) => {
+const SettingsItem: React.FC<SettingsItemProps> = ({ title, description, isActive, onToggle, showDivider = true, showChevron = false }) => {
     const { theme } = useThemeContext();
     
     return (
         <>
             <View style={styles.settingsItemContainer}>
-                <View style={styles.headerContainer}>
-                    <Text style={[styles.title, { color: theme.colors.text }]}>{title}</Text>
-                    <View style={styles.switchContainer}>
-                        <Switch
-                            trackColor={{
-                                false: theme.colors.text,
-                                true: theme.colors.primary
-                            }}
-                            thumbColor={theme.colors.white}
-                            ios_backgroundColor={theme.colors.card}
-                            onValueChange={onToggle}
-                            value={isActive}
-                            style={Platform.select({
-                                ios: { transform: [{ scaleX: 0.8 }, { scaleY: 0.8 }] },
-                                android: { transform: [{ scaleX: 1.2 }, { scaleY: 1.2 }] },
-                            })}
-                        />
+                <TouchableOpacity onPress={onToggle} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
+                    <View style={{ flex: 1, flexDirection: 'column', justifyContent: 'center', alignItems: 'flex-start' }}>
+                        <Text style={[styles.title, { color: theme.colors.text }]}>{title}</Text>
+                        <Text style={[styles.paragraph, { color: theme.colors.text }]}>{description}</Text>
                     </View>
-                </View>
-                <Text style={[styles.paragraph, { color: theme.colors.text }]}>{description}</Text>
+                    <View style={[styles.switchContainer, { flexShrink: 0 }]}>
+                        {showChevron ? (
+                                <Feather name="chevron-right" size={24} color={theme.colors.text} />
+                        ) : (
+                            <Switch
+                                trackColor={{
+                                    false: theme.colors.text,
+                                    true: theme.colors.primary
+                                }}
+                                thumbColor={theme.colors.white}
+                                ios_backgroundColor={theme.colors.card}
+                                onValueChange={onToggle}
+                                value={isActive}
+                                style={Platform.select({
+                                    ios: { transform: [{ scaleX: 0.8 }, { scaleY: 0.8 }] },
+                                    android: { transform: [{ scaleX: 1.2 }, { scaleY: 1.2 }] },
+                                })}
+                            />
+                        )}
+                    </View>
+                </TouchableOpacity>
             </View>
             {showDivider && (
                 <View style={[styles.dividerContainer]}>
@@ -315,10 +325,10 @@ const ResetButton: React.FC = () => {
     );
 };
 
-export default function Settings() {
+const Settings: React.FC = () => {
     const { theme } = useThemeContext();
     const insets = useSafeAreaInsets();
-
+    const [otaWizardVisible, setOtaWizardVisible] = useState(false);
     const {
         updateMomentary,
         updateReedSwitch,
@@ -329,10 +339,15 @@ export default function Settings() {
         isLoading: bleLoading,
         isConnected,
         isScanning,
-        firmwareVersion
+        firmwareVersion,
+        otaModeRequested,
+        wifiIp,
+        wifiSsid,
     } = useBLEConnectionContext();  
     const router = useRouter();
     const pathname = usePathname();
+
+
 
     const animatedLoadingValue = React.useState(new Animated.Value(0))[0];
 
@@ -366,6 +381,7 @@ export default function Settings() {
         outputRange: [1, 0],
     });
 
+
     return (
         <SafeAreaView style={[styles.container, { backgroundColor: theme.colors.background, paddingTop: insets.top }]}>
             <View style={[styles.topBar, styles.horizontal]}>
@@ -386,6 +402,18 @@ export default function Settings() {
                 <ThemeSelector />
                 {firmwareVersion > 0 && (
                     <View>
+                        {firmwareVersion > 1 && (
+                            <SettingsGroup>
+                                <SettingsItem
+                                    title={"Over The Air Update Mode (" + (otaModeRequested ? "enabled" : "disabled") + ")"}
+                                    description={"Turn on to allow over the air updates. This will disable the shot stopper while ON."}
+                                    isActive={otaModeRequested}
+                                    onToggle={() => setOtaWizardVisible(true)}
+                                    showDivider={false}
+                                    showChevron={true}
+                                />
+                            </SettingsGroup>
+                        )}
                         <SettingsGroup>
                             <SettingsItem
                                 title="Auto-tare"
@@ -414,9 +442,10 @@ export default function Settings() {
                 <Text style={[styles.paragraph, {color: theme.colors.text, textAlign: 'center', marginBottom: 20}]}>Firmware version: {firmwareVersion}</Text>
             </ScrollView>
             <DemoMode />
+            <OTAWizard isVisible={otaWizardVisible} onClose={() => setOtaWizardVisible(false)} />
         </SafeAreaView>
     );
-}
+};
 
 const styles = StyleSheet.create({
     container: {
@@ -443,7 +472,7 @@ const styles = StyleSheet.create({
         flexDirection: 'column',
         marginVertical: 20,
         borderRadius: 24,
-        maxWidth: 450,
+        maxWidth: 480,
         width: '100%',
     },
     headerContainer: {
@@ -455,12 +484,12 @@ const styles = StyleSheet.create({
     },
     title: {
         fontSize: 16,
-        fontFamily: "MenloRegular",
+        fontFamily: "InterMedium",
         flex: 1,
     },
     paragraph: {
         fontSize: 14,
-        fontFamily: "MenloRegular",
+        fontFamily: "InterRegular",
     },
     titleText: {
         fontSize: 32,
@@ -496,12 +525,12 @@ const styles = StyleSheet.create({
     },
     themeNumber: {
         fontSize: 40,
-        fontFamily: 'MenloRegular',
+        fontFamily: 'MenloBold',
         fontWeight: '600',
     },
     themeLabel: {
         fontSize: 12,
-        fontFamily: 'MenloRegular',
+        fontFamily: 'InterRegular',
         marginTop: 4,
     },
     settingsItemContainer: {
@@ -553,7 +582,7 @@ const styles = StyleSheet.create({
     },
     valueText: {
         fontSize: 16,
-        fontFamily: "MenloRegular",
+        fontFamily: "InterRegular",
         marginLeft: 8,
     },
     resetButtonContainer: {
@@ -573,7 +602,24 @@ const styles = StyleSheet.create({
     resetButtonText: {
         color: '#FFFFFF',
         fontSize: 16,
-        fontFamily: 'MenloRegular',
+        fontFamily: 'InterRegular',
         fontWeight: '600',
     },
+    openButton: {
+        margin: 16,
+        padding: 16,
+        backgroundColor: '#007BFF',
+        borderRadius: 8,
+        alignItems: 'center',
+    },
+    openButtonText: {
+        color: '#FFFFFF',
+        fontSize: 16,
+    },
+    contentContainer: {
+        flex: 1,
+        alignItems: 'center',
+    },
 });
+
+export default Settings;

@@ -15,6 +15,9 @@ interface BLEConnectionState {
     updateAutoTare: (value: boolean) => Promise<void>;
     readAutoTare: () => Promise<boolean>;
     autoTare: boolean;
+    updateEnabled: (value: boolean) => Promise<void>;
+    readEnabled: () => Promise<boolean>;
+    enabled: boolean;
     updateWeightValue: (value: number) => Promise<void>;
     readWeightValue: () => Promise<number>;
     weightValue: number;
@@ -39,6 +42,16 @@ interface BLEConnectionState {
     firmwareVersion: number;
     isDemoMode: RefObject<boolean>;
     demoConnectToDevice: () => Promise<void>;
+    shotStatus: boolean;
+    updateOtaModeRequested: (value: boolean) => Promise<void>;
+    otaModeRequested: boolean;
+    wifiSsid: string;
+    wifiIp: string;
+    updateWifiSsid: (value: string) => Promise<void>;
+    readWifiSsid: () => Promise<string>;
+    updateWifiPassword: (value: string) => Promise<void>;
+    updateWifiIp: (value: string) => Promise<void>;
+    readWifiIp: () => Promise<string>;
 }
 
 const BLEConnectionContext = createContext<BLEConnectionState | null>(null);

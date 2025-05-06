@@ -7,6 +7,7 @@ import { useThemeContext } from '../hooks/useThemeContext';
 import { BLEConnectionProvider, useBLEConnectionContext } from '../contexts/BLEConnectionContext';
 import { StatusBar } from 'expo-status-bar';
 import DemoMode from './DemoMode';
+import BleManager from 'react-native-ble-manager';
 
 interface BLEConnectionGuardProps {
     children: React.ReactNode;
@@ -16,6 +17,13 @@ function Guard({ children }: { children: React.ReactNode }) {
     const { isConnected, isScanning, connectToDevice, isConnecting, bluetoothState, demoConnectToDevice, isDemoMode } = useBLEConnectionContext();
     const { theme, isDarkMode } = useThemeContext();
     const colors = theme.colors;
+
+    React.useEffect(() => {
+        BleManager.start({ showAlert: false }).then(() => {
+            console.log("BLE Module initialized");
+            connectToDevice();
+        })
+    }, [])
 
     if (isScanning || !isConnected) {
         return (

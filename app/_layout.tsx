@@ -10,7 +10,6 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import BLEConnectionGuard from './components/BLEConnectionGuard';
 import { initialize } from '@microsoft/react-native-clarity';
-import BleManager from 'react-native-ble-manager';
 // Import the functions you need from the SDKs you need
 import { initializeApp } from "firebase/app";
 import { getAnalytics } from "firebase/analytics";
@@ -37,10 +36,6 @@ initialize("qm8srg6dza");
 
 // Prevent the splash screen from auto-hiding before asset loading is complete.
 SplashScreen.preventAutoHideAsync();
-
-BleManager.start({ showAlert: false }).then(() => {
-  console.log("BLE Module initialized");
-})
 
 const AppContent = () => {
   const { theme, isDarkMode } = useThemeContext();
@@ -90,6 +85,9 @@ export default function RootLayout() {
     MenloRegular: require('../assets/fonts/Menlo-Regular.ttf'),
     MenloBold: require('../assets/fonts/Menlo-Bold.ttf'),
     InstrumentSherif: require('../assets/fonts/InstrumentSerif-Regular.ttf'),
+    InterMedium: require('../assets/fonts/Inter_18pt-Medium.ttf'),
+    InterRegular: require('../assets/fonts/Inter_18pt-Regular.ttf'),
+    InterLight: require('../assets/fonts/Inter_18pt-Light.ttf'),
   });
 
   useEffect(() => {

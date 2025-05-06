@@ -23,6 +23,7 @@ const currentConfig = {
     deviceId: '',
     serviceUUID: '00000000-0000-0000-0000-000000000ffe',
     characteristics: {
+        ENABLED: '00000000-0000-0000-0000-00000000FF10',
         WEIGHT_VALUE: '00000000-0000-0000-0000-00000000FF11',
         REED_SWITCH: '00000000-0000-0000-0000-00000000FF12',
         MOMENTARY: '00000000-0000-0000-0000-00000000FF13',
@@ -32,6 +33,11 @@ const currentConfig = {
         DRIP_DELAY: '00000000-0000-0000-0000-00000000FF17',
         FIRMWARE_VERSION: '00000000-0000-0000-0000-00000000FF18',
         SCALE_STATUS: '00000000-0000-0000-0000-00000000FF19',
+        SHOT_STATUS: '00000000-0000-0000-0000-00000000FF20',
+        OTA_MODE_REQUESTED: '00000000-0000-0000-0000-00000000FF21',
+        WIFI_SSID: '00000000-0000-0000-0000-00000000FF22',
+        WIFI_PASSWORD: '00000000-0000-0000-0000-00000000FF23',
+        WIFI_IP: '00000000-0000-0000-0000-00000000FF24',
     }
 }
 
@@ -45,6 +51,7 @@ const legacyConfig = {
 }
 
 interface DeviceSettings {
+    enabled: boolean;
     autoTare: boolean;
     momentary: boolean;
     reedSwitch: boolean;
@@ -54,11 +61,17 @@ interface DeviceSettings {
     weightValue: number;
     scaleStatus: ScaleStatus;
     firmwareVersion: number;
+    shotStatus: boolean;
+    otaModeRequested: boolean;
+    wifiSsid: string;
+    wifiPassword: string;
+    wifiIp: string;
 }
 
 const requestBlePermissions = async (): Promise<boolean> => {
     if (Platform.OS === 'ios') {
         const bluetoothStatus = await request(PERMISSIONS.IOS.BLUETOOTH);
+        console.log("bluetoothStatus", bluetoothStatus)
         return bluetoothStatus === RESULTS.GRANTED;
     } else if (Platform.OS === 'android') {
         // For Android 12+ (SDK 31+)
@@ -100,6 +113,7 @@ export const useBLEConnection = () => {
     });
 
     const [settings, setSettings] = useState<DeviceSettings>({
+        enabled: true,
         autoTare: false,
         momentary: false,
         reedSwitch: false,
@@ -109,6 +123,11 @@ export const useBLEConnection = () => {
         weightValue: 36,
         scaleStatus: ScaleStatus.DISCONNECTED,
         firmwareVersion: 0,
+        shotStatus: false,
+        otaModeRequested: false,
+        wifiSsid: '',
+        wifiPassword: '',
+        wifiIp: '',
     });
 
     const [isLoading, setIsLoading] = useState(false);
@@ -167,27 +186,15 @@ export const useBLEConnection = () => {
 
             // Check for existing connections
             const connectedPeripherals = await BleManager.getConnectedPeripherals([]);
-            if (connectedPeripherals[0]?.advertising?.localName === 'shotStopper') {
-                const serviceUUID = connectedPeripherals[0].advertising?.serviceUUIDs?.[0] ?? currentConfig.serviceUUID;
-                config.current = getConfig(serviceUUID, connectedPeripherals[0].id);
-                await BleManager.connect(config.current.deviceId);
-                if (Platform.OS === 'android') {
-                    await BleManager.requestConnectionPriority(config.current.deviceId, 1);
-                }
-                await BleManager.retrieveServices(config.current.deviceId);
-                await readAllSettings();
-                setState({
-                    isScanning: false,
-                    isConnected: true,
-                    error: null,
-                    bluetoothState: bleState
-                });
-                return;
+            console.log("connectedPeripherals", JSON.stringify(connectedPeripherals))
+            if (connectedPeripherals.length === 1) {
+                console.log("Established connection to previously connected device", connectedPeripherals[0])
+                await commonConnectionFlow(connectedPeripherals[0], { isConnected: true, isScanning: false, error: null, bluetoothState: bleState });
             } else {
                 await BleManager.scan(serviceUUIDs, scanDuration, false, {
                     matchMode: BleScanMatchMode.Aggressive,
                     scanMode: BleScanMode.LowLatency,
-                    callbackType: BleScanCallbackType.AllMatches,
+                    callbackType: BleScanCallbackType.FirstMatch,
                 });
             }
 
@@ -218,30 +225,55 @@ export const useBLEConnection = () => {
         }));
     };
 
+    const commonConnectionFlow = async (peripheral: Peripheral, state?: any) => {
+        const startTime = new Date();
+        const serviceUUID = peripheral.advertising?.serviceUUIDs?.[0] ?? currentConfig.serviceUUID;
+        config.current = getConfig(serviceUUID, peripheral.id);
+        console.log("connecting", elapsedTime(startTime))
+        await BleManager.connect(config.current.deviceId, { autoconnect: true });
+        console.log("connected", elapsedTime(startTime))
+        if (Platform.OS === 'android') {
+            await BleManager.requestConnectionPriority(config.current.deviceId, 1);
+        }
+        console.log("retrieving services", elapsedTime(startTime))
+        await BleManager.retrieveServices(config.current.deviceId);
+        console.log("retrieved services", elapsedTime(startTime))
+        const firmwareVersion = await readAllSettings();
+        if (state) {
+            setState(prev => ({
+                ...prev,
+                ...state,
+            }));
+        }
+        await listenForNotifications(firmwareVersion);
+        await readBackgroundSettings(firmwareVersion);
+    }
+
+    const elapsedTime = (startTime: Date) => {
+        const now = new Date();
+        return (now.getTime() - startTime.getTime()) / 1000;
+    }
+
     useEffect(() => {
 
+        const discoveredDevices = new Map();
+
         const onDiscoverListener = BleManager.onDiscoverPeripheral(async (peripheral: Peripheral) => {
-            console.log("onDiscoverListener", peripheral)
+            if (!discoveredDevices.has(peripheral.id)) {
+                discoveredDevices.set(peripheral.id, peripheral);
+                console.log('New device discovered:', peripheral);
+                BleManager.stopScan();
+              } else {
+                console.log('Duplicate device ignored:', peripheral.id);
+                return;
+            }
             try {
-                const serviceUUID = peripheral.advertising?.serviceUUIDs?.[0] ?? currentConfig.serviceUUID;
-                config.current = getConfig(serviceUUID, peripheral.id);
-                await BleManager.connect(config.current.deviceId);
-                if (Platform.OS === 'android') {
-                    await BleManager.requestConnectionPriority(config.current.deviceId, 1);
-                }
-                await BleManager.retrieveServices(config.current.deviceId);
-                const connectedPeripherals = await BleManager.getConnectedPeripherals([]);
-                console.log("connectedPeripherals", connectedPeripherals)
-                await readAllSettings();
+                isConnecting.current = true;
+                await commonConnectionFlow(peripheral, { isConnected: true, isScanning: false, error: null });
             } catch (error) {
                 console.error('Connection error:', error);
             } finally {
-                setState(prev => ({
-                    ...prev,
-                    isConnected: true,
-                    isScanning: false,
-                    error: null
-                }));
+                isConnecting.current = false;
                 await BleManager.stopScan();
             }
         });
@@ -265,13 +297,10 @@ export const useBLEConnection = () => {
 
         const onConnectListener = BleManager.onConnectPeripheral(async (args: any) => {
             console.log('Connected to:', args);
-            // BleManager.stopScan();
-            // deviceId.current = args.peripheral;
         });
 
         const onDisconnectListener = BleManager.onDisconnectPeripheral((event: any) => {
             console.log('Disconnected from:', event);
-            // deviceId.current = null;
             setState(prev => ({
                 ...prev,
                 isConnected: false,
@@ -280,20 +309,27 @@ export const useBLEConnection = () => {
         });
 
         const onStopScanListener = BleManager.onStopScan(() => {
+            console.log("onStopScanListener")
             setState(prev => ({ ...prev, isScanning: false }));
         });
 
         const onScaleStatusListener = BleManager.onDidUpdateValueForCharacteristic(async (args: any) => {
-            if (args["characteristic"].toLowerCase() === config.current.characteristics.SCALE_STATUS.toLowerCase()) {
-                const status = args.value[0] === 1 ? ScaleStatus.CONNECTED : ScaleStatus.DISCONNECTED;
-                console.log("onScaleStatusListener", args, status)
-                setSettings(prev => ({ ...prev, scaleStatus: status }));
+            const characteristic = args["characteristic"].toLowerCase();
+            if (characteristic === config.current.characteristics.SHOT_STATUS.toLowerCase()) {
+                console.log("Notification: shotStatus -", args.value[0] === 1)
+                setSettings(prev => ({ ...prev, shotStatus: args.value[0] === 1 }));
+            }
+            if (characteristic === config.current.characteristics.SCALE_STATUS.toLowerCase()) {
+                console.log("Notification: scaleStatus -", args.value[0])
+                setSettings(prev => ({ ...prev, scaleStatus: args.value[0] }));
+            }
+            if (characteristic === config.current.characteristics.WIFI_IP.toLowerCase()) {
+                const wifiIpNotification = bytesToString(args.value);
+                console.log("Notification: wifiIp -", wifiIpNotification)
+                setSettings(prev => ({ ...prev, wifiIp: wifiIpNotification }));
             }
         });
 
-        if (!state.isConnected || state.error) {
-            connectToDevice();
-        }
         return () => {
             onDiscoverListener.remove();
             onConnectListener.remove();
@@ -318,7 +354,16 @@ export const useBLEConnection = () => {
         return () => appStateSubscription.remove();
     }, []);
 
-    const readCharacteristic = async (characteristic: string, retries = 3): Promise<any> => {
+    function bytesToString(byteArray: any) {
+        return String.fromCharCode.apply(null, byteArray);
+    }
+
+    function stringToBytes(str: string): number[] {
+        const encoder = new TextEncoder();
+        return Array.from(encoder.encode(str));
+    }
+
+    const readCharacteristic = useCallback(async (characteristic: string, retries = 3): Promise<any> => {
         if (!config.current) {
             throw new Error('Config is not set');
         }
@@ -330,13 +375,20 @@ export const useBLEConnection = () => {
                     characteristic
                 );
                 console.log("read characteristic", characteristic, data)
+
+                if (characteristic === config.current.characteristics.WIFI_SSID ||
+                    characteristic === config.current.characteristics.WIFI_IP) {
+                    return bytesToString(data);
+                }
+                
                 if (characteristic === config.current.characteristics.AUTO_TARE ||
                     characteristic === config.current.characteristics.MOMENTARY ||
-                    characteristic === config.current.characteristics.REED_SWITCH) {
+                    characteristic === config.current.characteristics.REED_SWITCH ||
+                    characteristic === config.current.characteristics.ENABLED) {
                     return data[0] === 1;
-                } else {
-                    return data[0];
                 }
+
+                return data[0];
             } catch (error) {
                 console.error(`Read attempt ${attempt} failed:`, error);
                 if (attempt === retries) {
@@ -345,9 +397,9 @@ export const useBLEConnection = () => {
                 await delay(200);
             }
         }
-    };
+    }, [config]);
 
-    const writeCharacteristic = async (characteristic: string, value: any): Promise<void> => {
+    const writeCharacteristic = useCallback(async (characteristic: string, value: any): Promise<void> => {
         try {
             if (isDemoMode.current) {
                 await delay(1000);
@@ -356,7 +408,15 @@ export const useBLEConnection = () => {
             if (!config.current) {
                 throw new Error('Config is not set');
             }
-            const bytes = typeof value === 'boolean' ? [value ? 1 : 0] : [Math.max(0, Math.min(255, Math.floor(value)))];
+            let bytes;
+            if (characteristic === config.current.characteristics.WIFI_SSID ||
+                characteristic === config.current.characteristics.WIFI_PASSWORD) {
+                // Convert string to byte array for WIFI_SSID
+                bytes = stringToBytes(value);
+            } else {
+                // Handle other characteristics
+                bytes = typeof value === 'boolean' ? [value ? 1 : 0] : [Math.max(0, Math.min(255, Math.floor(value)))];
+            }
 
             const connectedPeripherals = await BleManager.getConnectedPeripherals([]);
             console.log("connectedPeripherals", connectedPeripherals)
@@ -366,16 +426,16 @@ export const useBLEConnection = () => {
                     config.current.serviceUUID,
                     characteristic,
                     bytes,
-                    1
+                    bytes.length
                 );
             console.log("wrote characteristic", characteristic, value)
         } catch (error) {
             await disconnectFromDevice();
             throw error;
         }
-    };
+    }, [isDemoMode, config]);
 
-    const updateSetting = async <K extends keyof DeviceSettings>(
+    const updateSetting = useCallback(async <K extends keyof DeviceSettings>(
         key: K,
         value: DeviceSettings[K],
         characteristic: string
@@ -392,70 +452,210 @@ export const useBLEConnection = () => {
         } finally {
             setIsLoading(false);
         }
-    };
+    }, [settings, writeCharacteristic]);
 
-    const listenForScaleStatus = async () => {
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    const listenForNotifications = async (firmwareVersion: number) => {
+        console.log(":ALERT: listenForNotifications", firmwareVersion)
         if (!config.current) {
             throw new Error('Config is not set');
         }
-        await BleManager.startNotification(config.current.deviceId, config.current.serviceUUID, config.current.characteristics.SCALE_STATUS);
+
+        if (firmwareVersion === 0) {
+            console.log(":ALERT: firmwareVersion 0, skipping notifications")
+            return;
+        }
+
+        const characteristicsToNotify = [
+            config.current.characteristics.SCALE_STATUS,
+        ];
+
+        if (firmwareVersion > 1) {
+            console.log(":ALERT: adding wifi ip notification")
+            characteristicsToNotify.push(
+                config.current.characteristics.SHOT_STATUS,
+                config.current.characteristics.WIFI_IP,
+            );
+        }
+
+        for (const characteristic of characteristicsToNotify) {
+            console.log(":ALERT: starting notification for", characteristic)
+            await BleManager.startNotification(config.current.deviceId, config.current.serviceUUID, characteristic);
+        }
+    };
+
+    const readBackgroundSettings = async (firmwareVersion: number) => {
+        console.log("reading background settings")
+        const promises: Promise<any>[] = [];
+        let autoTare: boolean;
+        let momentary: boolean;
+        let reedSwitch: boolean;
+        let minShotDuration: number;
+        let maxShotDuration: number;
+        let dripDelay: number;
+        let wifiSsid: string;
+        let wifiIp: string;
+
+        if (firmwareVersion > 0) {
+            promises.push(readAutoTare());
+            promises.push(readMomentary());
+            promises.push(readReedSwitch());
+            promises.push(readMinShotDuration());
+            promises.push(readMaxShotDuration());
+            promises.push(readDripDelay());
+        }
+
+        if (firmwareVersion > 1) {
+            promises.push(readWifiSsid());
+            promises.push(readWifiIp());
+        }
+
+        console.log("firmwareVersion", firmwareVersion)
+        switch (firmwareVersion) {
+            case 0:
+                console.log("firmwareVersion 0");
+            case 1:
+                console.log("firmwareVersion 1");
+                [autoTare, momentary, reedSwitch, minShotDuration, maxShotDuration, dripDelay] = await Promise.all(promises);
+                setSettings(prev => ({
+                    ...prev,
+                    autoTare,
+                    momentary,
+                    reedSwitch,
+                    minShotDuration,
+                    maxShotDuration,
+                    dripDelay,
+                }));
+                break;
+            case 2:
+                console.log("firmwareVersion 2");
+                [autoTare, momentary, reedSwitch, minShotDuration, maxShotDuration, dripDelay, wifiSsid, wifiIp] = await Promise.all(promises);
+                setSettings(prev => ({
+                    ...prev,
+                    autoTare,
+                    momentary,
+                    reedSwitch,
+                    minShotDuration,
+                    maxShotDuration,
+                    dripDelay,
+                    wifiSsid,
+                    wifiIp,
+                }));
+                break;
+        }
     }
 
-    const readAllSettings = useCallback(async () => {
-        var firmwareVersion = 0;
+    const readAllSettings = async () => {
+        console.log("reading all settings")
+        var currentFirmwareVersion = 0;
         try {
-            firmwareVersion = await readFirmwareVersion();
+            currentFirmwareVersion = await readFirmwareVersion();
         } catch (error) {
             setSettings(prev => ({
                 ...prev,
                 firmwareVersion: 0,
             }));
         }
-        const weightValue = await readWeightValue();
-        setSettings(prev => ({
-            ...prev,
-            weightValue,
-            firmwareVersion,
-        }));
 
-        if (firmwareVersion > 0) {
-            const [autoTare, momentary, reedSwitch, minShotDuration, maxShotDuration, dripDelay, scaleStatus] = await Promise.all([
-                readAutoTare(),
-                readMomentary(),
-                readReedSwitch(),
-                readMinShotDuration(),
-                readMaxShotDuration(),
-                readDripDelay(),
-                readScaleStatus(),
-            ]);
-            await listenForScaleStatus();
-            setSettings(prev => ({
-                ...prev,
-                autoTare,
-                momentary,
-                reedSwitch,
-                minShotDuration,
-                maxShotDuration,
-                dripDelay,
-                scaleStatus,
-            }));
+        const promises: Promise<any>[] = [readWeightValue()];
+        let _notifications: boolean;
+        let weightValue: number;
+        // let autoTare: boolean;
+        // let momentary: boolean;
+        // let reedSwitch: boolean;
+        // let minShotDuration: number;
+        // let maxShotDuration: number;
+        // let dripDelay: number;
+        let scaleStatus: number;
+        let enabled: boolean;
+        let shotStatus: boolean;
+        let otaModeRequested: boolean;
+        // let wifiSsid: string;
+        // let wifiIp: string;
+
+        if (currentFirmwareVersion > 0) {
+            // promises.push(readAutoTare());
+            // promises.push(readMomentary());
+            // promises.push(readReedSwitch());
+            // promises.push(readMinShotDuration());
+            // promises.push(readMaxShotDuration());
+            // promises.push(readDripDelay());
+            promises.push(readScaleStatus());
         }
-    }, []);
+
+        if (currentFirmwareVersion > 1) {
+            promises.push(readEnabled());
+            promises.push(readShotStatus());
+            promises.push(readOtaModeRequested());
+            // promises.push(readWifiSsid());
+            // promises.push(readWifiIp());
+        }
+
+        console.log("currentFirmwareVersion", currentFirmwareVersion)
+        switch (currentFirmwareVersion) {
+            case 0:
+                console.log("firmwareVersion 0");
+                [weightValue] = await Promise.all(promises);
+                setSettings(prev => ({
+                    ...prev,
+                    weightValue,
+                    firmwareVersion: currentFirmwareVersion,
+                }));
+                break;
+            case 1:
+                console.log("firmwareVersion 1");
+                [weightValue, scaleStatus] = await Promise.all(promises);
+                setSettings(prev => ({
+                    ...prev,
+                    firmwareVersion: currentFirmwareVersion,
+                    weightValue,
+                    scaleStatus,
+                }));
+                break;
+            case 2:
+                console.log("firmwareVersion 2");
+                [weightValue, scaleStatus, enabled, shotStatus, otaModeRequested] = await Promise.all(promises);
+                setSettings(prev => ({
+                    ...prev,
+                    firmwareVersion: currentFirmwareVersion,
+                    weightValue,
+                    scaleStatus,
+                    enabled,
+                    shotStatus,
+                    otaModeRequested,
+                }));
+                break;
+        }
+        return currentFirmwareVersion;
+    };
 
     // Export your update functions
     const updateAutoTare = useCallback((value: boolean) => 
         updateSetting('autoTare', value, config.current.characteristics.AUTO_TARE), []);
 
-    const readAutoTare = useCallback(() => {
+    const readAutoTare = useCallback(async (): Promise<boolean> => {
         console.log("reading autoTare", config.current.characteristics.AUTO_TARE)
-        return readCharacteristic(config.current.characteristics.AUTO_TARE)
+        return Boolean(await readCharacteristic(config.current.characteristics.AUTO_TARE))
+    }, [readCharacteristic]);
+
+    const updateEnabled = useCallback((value: boolean) => 
+        updateSetting('enabled', value, config.current.characteristics.ENABLED), [updateSetting]);
+
+    const readEnabled = useCallback(async (): Promise<boolean> => {
+        console.log("reading enabled", config.current.characteristics.ENABLED)
+        return Boolean(await readCharacteristic(config.current.characteristics.ENABLED))
+    }, [readCharacteristic]);
+
+    const readShotStatus = useCallback(async (): Promise<boolean> => {
+        console.log("reading shotStatus", config.current.characteristics.SHOT_STATUS)
+        return Boolean(await readCharacteristic(config.current.characteristics.SHOT_STATUS))
     }, [readCharacteristic]);
 
     const updateWeightValue = useCallback((value: number) => {
         return updateSetting('weightValue', value, config.current.characteristics.WEIGHT_VALUE)
     }, [updateSetting]);
 
-    const readWeightValue = useCallback(async () => {
+    const readWeightValue = useCallback(async (): Promise<number> => {
         console.log("reading weightValue", config.current.characteristics.WEIGHT_VALUE)
         const weightValue = await readCharacteristic(config.current.characteristics.WEIGHT_VALUE)
         console.log("weightValue", weightValue)
@@ -465,53 +665,76 @@ export const useBLEConnection = () => {
     const updateMomentary = useCallback((value: boolean) => 
         updateSetting('momentary', value, config.current.characteristics.MOMENTARY), []);
 
-    const readMomentary = useCallback(() => {
+    const readMomentary = useCallback(async (): Promise<boolean> => {
         console.log("reading momentary", config.current.characteristics.MOMENTARY)
-        return readCharacteristic(config.current.characteristics.MOMENTARY)
+        return Boolean(await readCharacteristic(config.current.characteristics.MOMENTARY))
     }, [readCharacteristic]);
 
     const updateReedSwitch = useCallback((value: boolean) => 
         updateSetting('reedSwitch', value, config.current.characteristics.REED_SWITCH), []);
 
-    const readReedSwitch = useCallback(() => {
+    const readReedSwitch = useCallback(async (): Promise<boolean> => {
         console.log("reading reedSwitch", config.current.characteristics.REED_SWITCH)
-        return readCharacteristic(config.current.characteristics.REED_SWITCH)
+        return Boolean(await readCharacteristic(config.current.characteristics.REED_SWITCH))
     }, [readCharacteristic]);
 
     const updateMinShotDuration = useCallback((value: number) => 
         updateSetting('minShotDuration', value, config.current.characteristics.MIN_SHOT_DURATION), []);
 
-    const readMinShotDuration = useCallback(() => {
+    const readMinShotDuration = useCallback(async (): Promise<number> => {
         console.log("reading minShotDuration", config.current.characteristics.MIN_SHOT_DURATION)
-        return readCharacteristic(config.current.characteristics.MIN_SHOT_DURATION)
+        return Number(await readCharacteristic(config.current.characteristics.MIN_SHOT_DURATION))
     }, [readCharacteristic]);
 
     const updateMaxShotDuration = useCallback((value: number) => 
         updateSetting('maxShotDuration', value, config.current.characteristics.MAX_SHOT_DURATION), []);
 
-    const readMaxShotDuration = useCallback(() => {
+    const readMaxShotDuration = useCallback(async (): Promise<number> => {
         console.log("reading maxShotDuration", config.current.characteristics.MAX_SHOT_DURATION)
-        return readCharacteristic(config.current.characteristics.MAX_SHOT_DURATION)
+        return Number(await readCharacteristic(config.current.characteristics.MAX_SHOT_DURATION))
     }, [readCharacteristic]);
 
     const updateDripDelay = useCallback((value: number) => 
         updateSetting('dripDelay', value, config.current.characteristics.DRIP_DELAY), []);
 
-    const readDripDelay = useCallback(() => {
+    const readDripDelay = useCallback(async (): Promise<number> => {
         console.log("reading dripDelay", config.current.characteristics.DRIP_DELAY)
-        return readCharacteristic(config.current.characteristics.DRIP_DELAY)
+        return Number(await readCharacteristic(config.current.characteristics.DRIP_DELAY))
     }, [readCharacteristic]);
 
-    const readFirmwareVersion = useCallback(() => {
+    const readFirmwareVersion = useCallback(async (): Promise<number> => {
         console.log("reading firmwareVersion", config.current.characteristics.FIRMWARE_VERSION)
-        return readCharacteristic(config.current.characteristics.FIRMWARE_VERSION, 1)
+        return Number(await readCharacteristic(config.current.characteristics.FIRMWARE_VERSION, 1))
     }, [readCharacteristic]);
 
-    const readScaleStatus = useCallback(async () => {
+    const readScaleStatus = useCallback(async (): Promise<number> => {
         console.log("reading scaleStatus", config.current.characteristics.SCALE_STATUS)
-        await listenForScaleStatus();
-        return readCharacteristic(config.current.characteristics.SCALE_STATUS, 1)
-    }, [readCharacteristic, listenForScaleStatus]);
+        return Number(await readCharacteristic(config.current.characteristics.SCALE_STATUS, 1))
+    }, [readCharacteristic, listenForNotifications]);
+
+    const readOtaModeRequested = useCallback(async (): Promise<boolean> => {
+        console.log("reading otaModeRequested", config.current.characteristics.OTA_MODE_REQUESTED)
+        return Boolean(await readCharacteristic(config.current.characteristics.OTA_MODE_REQUESTED))
+    }, [readCharacteristic]);
+
+    const updateOtaModeRequested = useCallback((value: boolean) => 
+        updateSetting('otaModeRequested', value, config.current.characteristics.OTA_MODE_REQUESTED), []);
+
+    const updateWifiSsid = useCallback((value: string) => 
+        updateSetting('wifiSsid', value, config.current.characteristics.WIFI_SSID), []);
+
+    const readWifiSsid = useCallback(async (): Promise<string> => {
+        console.log("reading wifiSsid", config.current.characteristics.WIFI_SSID)
+        return await readCharacteristic(config.current.characteristics.WIFI_SSID)
+    }, [readCharacteristic]);
+
+    const updateWifiPassword = useCallback((value: string) => 
+        updateSetting('wifiPassword', value, config.current.characteristics.WIFI_PASSWORD), []);
+
+    const readWifiIp = useCallback(async (): Promise<string> => {
+        console.log("reading wifiIp", config.current.characteristics.WIFI_IP)
+        return await readCharacteristic(config.current.characteristics.WIFI_IP)
+    }, [readCharacteristic]);
 
     const resetToDefaults = useCallback(async () => {
         await writeCharacteristic(config.current.characteristics.WEIGHT_VALUE, 36);
@@ -541,6 +764,8 @@ export const useBLEConnection = () => {
         connectToDevice,
         updateAutoTare,
         readAutoTare, 
+        updateEnabled,
+        readEnabled,
         updateWeightValue,
         readWeightValue,
         updateMomentary,
@@ -557,6 +782,9 @@ export const useBLEConnection = () => {
         resetToDefaults,
         deviceId: config.current?.deviceId,
         isDemoMode,
-        demoConnectToDevice
+        demoConnectToDevice,
+        updateOtaModeRequested,
+        updateWifiSsid,
+        updateWifiPassword,
     };
 }; 

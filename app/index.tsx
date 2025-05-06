@@ -18,8 +18,11 @@ import { Feather } from "@expo/vector-icons";
 import { useNavigation, useRouter } from "expo-router";
 import { useThemeContext } from "./hooks/useThemeContext";
 import { useBLEConnectionContext } from './contexts/BLEConnectionContext';
-import { ScaleStatus } from "./hooks/useBLEConnection";
 import DemoMode from "./components/DemoMode";
+import EnabledButton from "./components/EnabledButton";
+import ScaleStatusBox from "./components/ScaleStatusBox";
+import OTAWizard from "./settings/otaWizard";
+import MemorySelector from "./components/MemorySelector";
 const { width, height } = Dimensions.get("screen");
 const color = {
   black: "#111110",
@@ -45,8 +48,9 @@ export default function App() {
     isLoading: bleLoading,
     weightValue: goalWeight,
     updateWeightValue,
-    scaleStatus,
-    firmwareVersion
+    otaModeRequested,
+    firmwareVersion,
+    enabled,
   } = useBLEConnectionContext();
 
   const scrollX = React.useRef(new Animated.Value((goalWeight - start) * ITEM_SIZE)).current;
@@ -74,15 +78,20 @@ export default function App() {
   }, [scrollX]);
 
 
+  React.useEffect(() => {
+    const offset = (goalWeight - start) * ITEM_SIZE;
+
+    scrollX.setValue(offset); // Manually update scrollX
+  }, [goalWeight]);
+
 
   const handleOnPressNavigation = (item: number) => {
     return (event: any) => {
-      if(item != goalWeight) {
+      if(item !== goalWeight) {
         flatList?.current?.scrollToIndex({
           index: item - start,
           animated: true,
-         });
-        return;
+        });
       }
     }
   }
@@ -115,120 +124,127 @@ export default function App() {
     outputRange: [1, 0],
   });
 
+  const paddingTop = () => {
+    const screenRatio = width / height;
+    if(screenRatio > 1) {
+      return '0';
+    }
+    return (-0.5*screenRatio + 0.5)*100 + '%';
+  }
+
+  const screenRatio = width / height;
+
+  console.log('screenRatio', screenRatio);
+
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
-
-      <View
-        style={{
-          position: "absolute",
-          top: height / 3,
-          left: 0,
-          right: 0,
-          flex: 1,
-        }}>
-        <Animated.FlatList
-          ref={flatList}
-          showsHorizontalScrollIndicator={false}
-          data={weights}
-          keyExtractor={(item) => item.toString()}
-          initialScrollIndex={goalWeight - start}
-          maxToRenderPerBatch={10}
-          windowSize={5}
-          horizontal
-          getItemLayout={(data, index) => ({
-            length: ITEM_SIZE, // Adjust based on item width
-            offset: ITEM_SIZE * index, // Width * index
-            index,
-          })}
-          snapToInterval={ITEM_SIZE}
-          decelerationRate='fast'
-          contentContainerStyle={{ paddingHorizontal: ITEM_SPACING }}
-          style={{ flexGrow: 0, opacity }}
-          onMomentumScrollEnd={(e: NativeSyntheticEvent<NativeScrollEvent>) => {
-            const offsetX = e.nativeEvent.contentOffset.x;
-            const value = weights[Math.round(offsetX / ITEM_SIZE)];
-            if (isConnected) {
-              updateWeightValue(value)
-            }
-          }}
-          onScroll={Animated.event(
-            [{ nativeEvent: { contentOffset: { x: scrollX } } }],
-            { useNativeDriver: true }
+      <View style={{ flex: 1 }}>
+        <Animated.View style={{ opacity }}>
+          <View style={[styles.topBar, styles.horizontal]}>
+          <Text style={[styles.titleText, {color: colors.text}]}>shotStopper</Text>
+          {bleLoading ? (
+            <ActivityIndicator size="small" color={colors.text} />
+          ) : (
+              <Animated.View style={{ opacity: loadingOpacity }}>
+                <TouchableOpacity onPress={() => {
+                    router.navigate({ pathname: "/settings" });
+                  }}>
+                  <Feather name="sliders" style={{paddingTop: 10}} size={24} color={colors.text}/>
+                </TouchableOpacity>
+            </Animated.View>
           )}
-          bounces={true}
-          renderItem={({ item, index }) => {
-            const inputRange = [
-              (index - 1) * ITEM_SIZE,
-              index * ITEM_SIZE,
-              (index + 1) * ITEM_SIZE,
-            ];
-            const scale = scrollX.interpolate({
-              inputRange,
-              outputRange: [0.5, 1, 0.5],
-              extrapolate: "clamp",
-            });
-            const opacity = scrollX.interpolate({
-              inputRange,
-              outputRange: [0.3, 1, 0.3],
-              extrapolate: "clamp",
-            });
-            return (
-              <View style={{ width: ITEM_SIZE, height: width }}>
-                <Animated.Text
-                  onPress={handleOnPressNavigation(item)}
-                  style={[
-                    styles.text,
-                    {
-                      textAlign: "center",
-                      opacity,
-                      color: colors.primary,
-                      transform: [
-                        {
-                          perspective: ITEM_SIZE * 4,
-                        },
-                        {
-                          scale,
-                        },
-                      ],
-                    },
-                  ]}>
-                  {item}
-                  <Text style={{fontSize: ITEM_SIZE * 0.3}}>g</Text>
-                </Animated.Text>
-              </View>
-            );
-          }}
-        />
-      </View>
-      <Animated.View style={{ opacity }}>
-        <View style={[styles.topBar, styles.horizontal]}>
-        <Text style={[styles.titleText, {color: colors.text}]}>shotStopper</Text>
-        {bleLoading ? (
-          <ActivityIndicator size="small" color={colors.text} />
-        ) : (
-            <Animated.View style={{ opacity: loadingOpacity }}>
-              <TouchableOpacity onPress={() => {
-                  router.navigate({ pathname: "/settings" });
-                }}>
-                <Feather name="sliders" style={{paddingTop: 10}} size={24} color={colors.text}/>
-              </TouchableOpacity>
+          </View>
+        </Animated.View>
+        <View style={{ flex: 1, paddingTop: paddingTop() }}>
+          <Animated.FlatList
+            ref={flatList}
+            showsHorizontalScrollIndicator={false}
+            data={weights}
+            keyExtractor={(item) => item.toString()}
+            initialScrollIndex={goalWeight - start}
+            maxToRenderPerBatch={10}
+            windowSize={5}
+            horizontal
+            getItemLayout={(data, index) => ({
+              length: ITEM_SIZE, // Adjust based on item width
+              offset: ITEM_SIZE * index, // Width * index
+              index,
+            })}
+            snapToInterval={ITEM_SIZE}
+            decelerationRate='fast'
+            contentContainerStyle={{ paddingHorizontal: ITEM_SPACING }}
+            style={{ flexGrow: 0, opacity }}
+            onMomentumScrollEnd={(e: NativeSyntheticEvent<NativeScrollEvent>) => {
+              const offsetX = e.nativeEvent.contentOffset.x;
+              const value = weights[Math.round(offsetX / ITEM_SIZE)];
+              if (isConnected) {
+                updateWeightValue(value)
+              }
+            }}
+            onScroll={Animated.event(
+              [{ nativeEvent: { contentOffset: { x: scrollX } } }],
+              { useNativeDriver: true }
+            )}
+            bounces={true}
+            renderItem={({ item, index }) => {
+              const inputRange = [
+                (index - 1) * ITEM_SIZE,
+                index * ITEM_SIZE,
+                (index + 1) * ITEM_SIZE,
+              ];
+              const scale = scrollX.interpolate({
+                inputRange,
+                outputRange: [0.5, 1, 0.5],
+                extrapolate: "clamp",
+              });
+              const opacity = scrollX.interpolate({
+                inputRange,
+                outputRange: [0.3, 1, 0.3],
+                extrapolate: "clamp",
+              });
+              return (
+                <View style={{ width: ITEM_SIZE }}>
+                  <Animated.Text
+                    onPress={handleOnPressNavigation(item)}
+                    style={[
+                      styles.text,
+                      {
+                        textAlign: "center",
+                        opacity,
+                        color: enabled ? colors.primary : colors.text,
+                        transform: [
+                          {
+                            perspective: ITEM_SIZE * 4,
+                          },
+                          {
+                            scale,
+                          },
+                        ],
+                      },
+                    ]}>
+                    {item}
+                    <Text style={{fontSize: ITEM_SIZE * 0.3}}>g</Text>
+                  </Animated.Text>
+                </View>
+              );
+            }}
+          />
+        </View>
+        <MemorySelector onMemorySelected={(value) => {
+          flatList?.current?.scrollToIndex({
+            index: value - start,
+            animated: true,
+          });
+        }}/>
+        { firmwareVersion > 0 && (
+          <Animated.View style={[{ opacity, bottom: 20, width: '100%', marginTop: 10, maxWidth: 480, alignSelf: 'center' } ]}>
+            <ScaleStatusBox />
+            <EnabledButton />
           </Animated.View>
         )}
-        </View>
-      </Animated.View>
-      { firmwareVersion > 0 && (
-      <Animated.View style={[styles.bottomBar, styles.left, { opacity } ]}>
-        <View >
-          <View style={styles.scaleStatus}>
-            <Feather name={scaleStatus === ScaleStatus.CONNECTED ? "wifi" : "wifi-off"} style={{ padding: 1, paddingRight: 10 }} size={16} color={colors.text}/>
-            <Animated.Text style={[styles.smallText, {color: colors.text}]}>
-                {scaleStatus === ScaleStatus.CONNECTED ? "Scale connected" : "Looking for scale..."}
-            </Animated.Text>
-          </View>
-        </View>
-      </Animated.View>
-      )}
-      <DemoMode />
+        <DemoMode />
+        <OTAWizard isVisible={otaModeRequested} onClose={() => {}} disableClose={true} />
+      </View>
     </SafeAreaView>
   );
 };
@@ -281,7 +297,7 @@ const styles = StyleSheet.create({
     padding: 10,
   },
   smallText: {
-    fontSize: 14,
+    fontSize: 16,
     fontFamily: "MenloRegular",
     fontWeight: "400",
   },
@@ -289,5 +305,5 @@ const styles = StyleSheet.create({
     fontSize: 32,
     fontFamily: "InstrumentSherif",
     fontWeight: "400",
-  },
+  }
 });

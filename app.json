@@ -13,12 +13,17 @@
       "googleServicesFile": "./GoogleService-Info.plist",
       "bundleIdentifier": "com.icapurro.shotStopperCompanion",
       "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "This app uses your location to access network information.",
+        "NSLocationAlwaysUsageDescription": "This app uses your location to access network information.",
         "NSBluetoothAlwaysUsageDescription": "Required to connect to the shotStopper device.",
         "NSBluetoothPeripheralUsageDescription": "Required to connect to the shotStopper device.",
         "UIBackgroundModes": [
           "bluetooth-central",
           "bluetooth-peripheral"
         ]
+      },
+      "entitlements": {
+        "com.apple.developer.networking.wifi-info": true
       }
     },
     "android": {
@@ -32,7 +37,10 @@
         "android.permission.BLUETOOTH_CONNECT",
         "android.permission.BLUETOOTH_SCAN",
         "android.permission.BLUETOOTH",
-        "android.permission.BLUETOOTH_ADMIN"
+        "android.permission.BLUETOOTH_ADMIN",
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_WIFI_STATE"
       ]
     },
     "web": {
@@ -41,6 +49,12 @@
       "favicon": "./assets/images/favicon.png"
     },
     "plugins": [
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "Allow $(PRODUCT_NAME) to use your location."
+        }
+      ],
       "expo-router",
       [
         "expo-splash-screen",
