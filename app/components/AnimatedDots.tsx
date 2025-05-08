@@ -11,8 +11,6 @@ export default function AnimatedDots({ enabled }: { enabled: boolean }) {
     const { theme } = useThemeContext();
     const colors = theme.colors;
 
-    console.log('AnimatedDots enabled:', enabled);
-
     React.useEffect(() => {
         if (enabled) {
             const animateDots = () => {

@@ -20,7 +20,6 @@ const WifiInfo: React.FC<{setWifiSsid: (ssid: string) => void}> = ({setWifiSsid}
     useEffect(() => {
         if (Platform.OS === 'ios') {
             Location.requestForegroundPermissionsAsync().then(status => {
-                console.log("location status", status)
                 if (status.status !== 'granted' && !status.canAskAgain) {
                 alert("Please enable location services to use this feature");
                 }
@@ -28,13 +27,12 @@ const WifiInfo: React.FC<{setWifiSsid: (ssid: string) => void}> = ({setWifiSsid}
         }
         // Fetch the SSID
         NetworkInfo.getSSID().then(ssid => {
-            console.log("SSID:", ssid);
             setSsid(ssid);
             if (ssid) {
                 setWifiSsid(ssid);
             }
         });
-    }, []);
+    }, [setWifiSsid]);
 
     return (
         <View style={styles.limitedHeight}>
@@ -112,9 +110,10 @@ export default function OTAWizard({ isVisible, onClose, disableClose = false }: 
         wifiSsid,
         updateWifiSsid,
         updateWifiPassword,
+        readWifiIp,
     } = useBLEConnectionContext();
 
-    const snapPoints = ['45%']
+    const snapPoints = ['45%', '65%']
 
     const enableOta = () => {
         updateWifiSsid(ssid);
@@ -136,6 +135,23 @@ export default function OTAWizard({ isVisible, onClose, disableClose = false }: 
         }
     }, [otaModeRequested, wifiIp]);
 
+    useEffect(() => {
+        let intervalId: any;
+
+        if (otaModeRequested && wifiIp === 'disconnected') {
+            intervalId = setInterval(() => {
+                readWifiIp();
+            }, 1000); // Run every second
+        }
+
+        // Clean up the interval when the component unmounts or conditions change
+        return () => {
+            if (intervalId) {
+                clearInterval(intervalId);
+            }
+        };
+    }, [otaModeRequested, wifiIp, readWifiIp]);
+
     // eslint-disable-next-line react-hooks/exhaustive-deps
     const handleNext = () => {
         if (currentView === 'wifiInfo') {
@@ -152,17 +168,15 @@ export default function OTAWizard({ isVisible, onClose, disableClose = false }: 
 
     useEffect(() => {
         if (isVisible) {
-            console.log("Opening OTA Wizard");
             bottomSheetRef.current?.snapToIndex(0); // Open the bottom sheet
         } else {
-            console.log("Closing OTA Wizard");
             bottomSheetRef.current?.close(); // Close the bottom sheet
         }
     }, [isVisible]);
 
     useEffect(() => {
         const keyboardDidShowListener = Keyboard.addListener('keyboardDidShow', () => {
-            bottomSheetRef.current?.expand(); // Expand the bottom sheet when the keyboard is shown
+            bottomSheetRef.current?.snapToIndex(1); // Expand the bottom sheet when the keyboard is shown
             setKeyboardOpen(true);
         });
 
@@ -212,7 +226,7 @@ export default function OTAWizard({ isVisible, onClose, disableClose = false }: 
     const renderFooter = React.useCallback(
         (        props: React.JSX.IntrinsicAttributes & BottomSheetDefaultFooterProps) => (
           <BottomSheetFooter {...props} bottomInset={24} style={styles.buttonContainer}>
-                <TouchableOpacity style={[styles.floatingButton, { backgroundColor: colors.primary }, keyboardOpen && { opacity: 0.0 }]} onPress={handleNext}>
+                <TouchableOpacity style={[styles.floatingButton, { backgroundColor: colors.primary }]} onPress={handleNext}>
                     <Text style={styles.buttonText}>{ buttonText() }</Text>
                 </TouchableOpacity>
           </BottomSheetFooter>

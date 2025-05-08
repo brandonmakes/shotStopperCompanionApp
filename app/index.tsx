@@ -15,7 +15,7 @@ import {
 import {SafeAreaView} from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
 import { Feather } from "@expo/vector-icons";
-import { useNavigation, useRouter } from "expo-router";
+import { useFocusEffect, useNavigation, useRouter } from "expo-router";
 import { useThemeContext } from "./hooks/useThemeContext";
 import { useBLEConnectionContext } from './contexts/BLEConnectionContext';
 import DemoMode from "./components/DemoMode";
@@ -23,6 +23,7 @@ import EnabledButton from "./components/EnabledButton";
 import ScaleStatusBox from "./components/ScaleStatusBox";
 import OTAWizard from "./settings/otaWizard";
 import MemorySelector from "./components/MemorySelector";
+import { useFocusEffect as useFocusEffectNavigation, useNavigationState } from '@react-navigation/native';
 const { width, height } = Dimensions.get("screen");
 const color = {
   black: "#111110",
@@ -42,6 +43,9 @@ export default function App() {
   const lastVibrationIndex = React.useRef(0);
   const flatList = React.createRef<FlatList<number>>();
   const navigation = useNavigation();
+
+  const state = useNavigationState(state => state);
+  console.log('Navigation state:', state);
   
   const { 
     isConnected, 
@@ -54,6 +58,8 @@ export default function App() {
   } = useBLEConnectionContext();
 
   const scrollX = React.useRef(new Animated.Value((goalWeight - start) * ITEM_SIZE)).current;
+
+  console.log('Index View');
 
 
   React.useEffect(() => {
@@ -124,17 +130,13 @@ export default function App() {
     outputRange: [1, 0],
   });
 
-  const paddingTop = () => {
+  const paddingTop = React.useCallback(() => {
     const screenRatio = width / height;
     if(screenRatio > 1) {
       return '0';
     }
     return (-0.5*screenRatio + 0.5)*100 + '%';
-  }
-
-  const screenRatio = width / height;
-
-  console.log('screenRatio', screenRatio);
+  }, [width, height]);
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>

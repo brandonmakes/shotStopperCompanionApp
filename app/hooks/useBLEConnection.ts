@@ -230,7 +230,7 @@ export const useBLEConnection = () => {
         const serviceUUID = peripheral.advertising?.serviceUUIDs?.[0] ?? currentConfig.serviceUUID;
         config.current = getConfig(serviceUUID, peripheral.id);
         console.log("connecting", elapsedTime(startTime))
-        await BleManager.connect(config.current.deviceId, { autoconnect: true });
+        await BleManager.connect(config.current.deviceId);
         console.log("connected", elapsedTime(startTime))
         if (Platform.OS === 'android') {
             await BleManager.requestConnectionPriority(config.current.deviceId, 1);
@@ -558,28 +558,13 @@ export const useBLEConnection = () => {
         }
 
         const promises: Promise<any>[] = [readWeightValue()];
-        let _notifications: boolean;
         let weightValue: number;
-        // let autoTare: boolean;
-        // let momentary: boolean;
-        // let reedSwitch: boolean;
-        // let minShotDuration: number;
-        // let maxShotDuration: number;
-        // let dripDelay: number;
         let scaleStatus: number;
         let enabled: boolean;
         let shotStatus: boolean;
         let otaModeRequested: boolean;
-        // let wifiSsid: string;
-        // let wifiIp: string;
 
         if (currentFirmwareVersion > 0) {
-            // promises.push(readAutoTare());
-            // promises.push(readMomentary());
-            // promises.push(readReedSwitch());
-            // promises.push(readMinShotDuration());
-            // promises.push(readMaxShotDuration());
-            // promises.push(readDripDelay());
             promises.push(readScaleStatus());
         }
 
@@ -587,8 +572,6 @@ export const useBLEConnection = () => {
             promises.push(readEnabled());
             promises.push(readShotStatus());
             promises.push(readOtaModeRequested());
-            // promises.push(readWifiSsid());
-            // promises.push(readWifiIp());
         }
 
         console.log("currentFirmwareVersion", currentFirmwareVersion)
@@ -786,5 +769,6 @@ export const useBLEConnection = () => {
         updateOtaModeRequested,
         updateWifiSsid,
         updateWifiPassword,
+        readWifiIp,
     };
 }; 

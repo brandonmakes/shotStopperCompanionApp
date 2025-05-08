@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { ActivityIndicator, SafeAreaView, TouchableOpacity, View, StyleSheet, Animated, Text, ScrollView, Switch, Platform, TextInput, Linking, Keyboard } from 'react-native';
+import { ActivityIndicator, SafeAreaView, TouchableOpacity, View, StyleSheet, Animated, Text, ScrollView, Switch, Platform } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { usePathname, useRouter } from 'expo-router';
 import { Easing } from 'react-native-reanimated';
@@ -10,10 +10,8 @@ import { Slider } from 'react-native-awesome-slider';
 import { useSharedValue } from 'react-native-reanimated';
 import { useBLEConnectionContext } from './contexts/BLEConnectionContext';
 import useDebounce from './hooks/useDebounce';
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 import DemoMode from './components/DemoMode';
-import { GestureHandlerRootView } from 'react-native-gesture-handler';
-import BottomSheet, { BottomSheetBackdrop, BottomSheetView } from '@gorhom/bottom-sheet';
 import OTAWizard from './settings/otaWizard';
 
 interface SettingsItemProps {
@@ -391,7 +389,7 @@ const Settings: React.FC = () => {
                 ) : (
                     <Animated.View style={{ opacity: loadingOpacity }}>
                         <TouchableOpacity onPress={() => {
-                            router.navigate({ pathname: "/" });
+                            router.back();
                         }}>
                             <Feather name="x" size={24} style={{paddingLeft: 30, paddingTop: 30, paddingRight: 40}} color={theme.colors.text} />
                         </TouchableOpacity>
