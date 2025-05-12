@@ -238,14 +238,15 @@ export const useBLEConnection = () => {
         console.log("retrieving services", elapsedTime(startTime))
         await BleManager.retrieveServices(config.current.deviceId);
         console.log("retrieved services", elapsedTime(startTime))
-        const firmwareVersion = await readAllSettings();
+        const firmwareVersion = await readFirmwareVersion();
+        await listenForNotifications(firmwareVersion);
+        await readAllSettings(firmwareVersion);
         if (state) {
             setState(prev => ({
                 ...prev,
                 ...state,
             }));
         }
-        await listenForNotifications(firmwareVersion);
         await readBackgroundSettings(firmwareVersion);
     }
 
@@ -545,18 +546,9 @@ export const useBLEConnection = () => {
         }
     }
 
-    const readAllSettings = async () => {
-        console.log("reading all settings")
-        var currentFirmwareVersion = 0;
-        try {
-            currentFirmwareVersion = await readFirmwareVersion();
-        } catch (error) {
-            setSettings(prev => ({
-                ...prev,
-                firmwareVersion: 0,
-            }));
-        }
 
+    const readAllSettings = async (currentFirmwareVersion: number) => {
+        console.log("reading all settings")
         const promises: Promise<any>[] = [readWeightValue()];
         let weightValue: number;
         let scaleStatus: number;
@@ -687,13 +679,18 @@ export const useBLEConnection = () => {
 
     const readFirmwareVersion = useCallback(async (): Promise<number> => {
         console.log("reading firmwareVersion", config.current.characteristics.FIRMWARE_VERSION)
-        return Number(await readCharacteristic(config.current.characteristics.FIRMWARE_VERSION, 1))
+        try {
+            return Number(await readCharacteristic(config.current.characteristics.FIRMWARE_VERSION, 1))
+        } catch (error) {
+            console.error("error reading firmwareVersion", error)
+            return 0;
+        }
     }, [readCharacteristic]);
 
     const readScaleStatus = useCallback(async (): Promise<number> => {
         console.log("reading scaleStatus", config.current.characteristics.SCALE_STATUS)
         return Number(await readCharacteristic(config.current.characteristics.SCALE_STATUS, 1))
-    }, [readCharacteristic, listenForNotifications]);
+    }, [readCharacteristic]);
 
     const readOtaModeRequested = useCallback(async (): Promise<boolean> => {
         console.log("reading otaModeRequested", config.current.characteristics.OTA_MODE_REQUESTED)

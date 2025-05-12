@@ -11,6 +11,16 @@ import { useThemeContext } from '../hooks/useThemeContext';
 import Feather from '@expo/vector-icons/build/Feather';
 import * as Location from 'expo-location';
 import { BlurView } from 'expo-blur';
+import * as SecureStore from 'expo-secure-store';
+
+const sanitizeSecureStoreKey = (key: string) => {
+    if (typeof key !== 'string' || key.length === 0) {
+      throw new Error('Key must be a non-empty string');
+    }
+  
+    // Replace any character not A-Z, a-z, 0-9, ".", "-", or "_" with "_"
+    return key.replace(/[^a-zA-Z0-9._-]/g, '_');
+  };
 
 const WifiInfo: React.FC<{setWifiSsid: (ssid: string) => void}> = ({setWifiSsid}) => {
     const [ssid, setSsid] = useState<string | null>(null);
@@ -50,18 +60,34 @@ const WifiInfo: React.FC<{setWifiSsid: (ssid: string) => void}> = ({setWifiSsid}
 const WifiPassword: React.FC<{ssid: string, password: string, setWifiPassword: (password: string) => void}> = ({ssid, password, setWifiPassword}) => {
     const { theme } = useThemeContext();
     const colors = theme.colors;
+    const [isPasswordVisible, setIsPasswordVisible] = useState(false);
+
+    const handlePasswordChange = (text: string) => {
+        setWifiPassword(text);
+        try {
+            SecureStore.setItem(sanitizeSecureStoreKey(`shotStopper-${ssid}`), text);
+        } catch (error) {
+            console.error('Error setting password in SecureStore', error);
+        }
+    }
+
     return (
         <View style={styles.centeredContainer}>
             <Text style={[styles.paragraph, { color: colors.text }]}>Enter WiFi Password for {ssid}</Text>
-            <TextInput
-                style={[styles.input, { color: colors.text, backgroundColor: colors.card }]}
-                placeholder="Password"
-                secureTextEntry
-                maxLength={32}
-                textAlign="center"
-                onChangeText={setWifiPassword}
-                value={password}
-            />
+            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                <TextInput
+                    style={[styles.input, { color: colors.text, backgroundColor: colors.card, flex: 1 }]}
+                    placeholder="Password"
+                    secureTextEntry={!isPasswordVisible}
+                    maxLength={32}
+                    textAlign="center"
+                    onChangeText={handlePasswordChange}
+                    value={password}
+                />
+                <TouchableOpacity style={{ position: 'absolute', right: 10, marginTop: 18 }} onPress={() => setIsPasswordVisible(!isPasswordVisible)}>
+                    <Feather name={isPasswordVisible ? 'eye-off' : 'eye'} size={20} color={colors.text} />
+                </TouchableOpacity>
+            </View>
         </View>
     );
 };
@@ -88,7 +114,6 @@ const OtaEnabled: React.FC<{ssid: string | null, otaEnabled: boolean, wifiIp: st
                 </Text>
             </View>
             )}
-            {/* Display OTA related info here */}
             
         </BottomSheetView>
     );
@@ -134,6 +159,17 @@ export default function OTAWizard({ isVisible, onClose, disableClose = false }: 
             });
         }
     }, [otaModeRequested, wifiIp]);
+
+    useEffect(() => {
+        try {
+            const pass = SecureStore.getItem(sanitizeSecureStoreKey(`shotStopper-${ssid}`))
+            if (pass) {
+                setWifiPassword(pass);
+            }
+        } catch (error) {
+            console.error('Error getting password from SecureStore', error);
+        }
+    }, [ssid]);
 
     useEffect(() => {
         let intervalId: any;
@@ -242,6 +278,9 @@ export default function OTAWizard({ isVisible, onClose, disableClose = false }: 
             enablePanDownToClose={!disableClose}
             onChange={(index) => {
                 if (index === -1) {
+                    if (currentView === 'wifiPassword') {
+                        setCurrentView('wifiInfo');
+                    }
                     onClose(); // Call onClose when the bottom sheet is closed
                 }
             }}
@@ -346,10 +385,9 @@ const styles = StyleSheet.create({
         marginTop: 28,
         marginBottom: 10,
         borderRadius: 10,
-        fontSize: 18,
-        lineHeight: 22,
+        fontSize: 24,
+        lineHeight: 32,
         padding: 8,
         textAlign: 'center',
-        width: 250, // Set a fixed width for the TextInput
     },
 });

@@ -2,7 +2,7 @@
   "expo": {
     "name": "shotStopperCompanion",
     "slug": "shotStopperCompanion",
-    "version": "1.2.1",
+    "version": "1.2.2",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "myapp",
@@ -20,7 +20,10 @@
         "UIBackgroundModes": [
           "bluetooth-central",
           "bluetooth-peripheral"
-        ]
+        ],
+        "NSAppTransportSecurity": {
+          "NSAllowsArbitraryLoads": true
+        }
       },
       "entitlements": {
         "com.apple.developer.networking.wifi-info": true
@@ -41,7 +44,8 @@
         "android.permission.ACCESS_FINE_LOCATION",
         "android.permission.ACCESS_COARSE_LOCATION",
         "android.permission.ACCESS_WIFI_STATE"
-      ]
+      ],
+      "usesCleartextTraffic": true
     },
     "web": {
       "bundler": "metro",
@@ -73,6 +77,7 @@
         "react-native-ble-manager",
         {
           "isBackgroundEnabled": true,
+          "isBleRequired": true,
           "modes": [
             "peripheral",
             "central"
@@ -95,9 +100,19 @@
       [
         "expo-build-properties",
         {
+          "android": {
+            "usesCleartextTraffic": true
+          },
           "ios": {
             "useFrameworks": "static"
           }
+        }
+      ],
+      [
+        "expo-secure-store",
+        {
+          "configureAndroidBackup": true,
+          "faceIDPermission": "Allow $(PRODUCT_NAME) to access your Face ID biometric data."
         }
       ]
     ],
