@@ -101,7 +101,10 @@
         "expo-build-properties",
         {
           "android": {
-            "usesCleartextTraffic": true
+            "usesCleartextTraffic": true,
+            "extraProguardRules": "-keep class * { *; }",
+            "enableShrinkResources": false,
+            "enablePageSizesConfig": true
           },
           "ios": {
             "useFrameworks": "static"
