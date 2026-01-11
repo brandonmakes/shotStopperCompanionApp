@@ -10,6 +10,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import BLEConnectionGuard from './components/BLEConnectionGuard';
 import { initialize } from '@microsoft/react-native-clarity';
+import { useKeepAwake } from 'expo-keep-awake';
 // Import the functions you need from the SDKs you need
 import { initializeApp } from "firebase/app";
 import { getAnalytics } from "firebase/analytics";
@@ -39,6 +40,9 @@ SplashScreen.preventAutoHideAsync();
 
 const AppContent = () => {
   const { theme, isDarkMode } = useThemeContext();
+  
+  // Keep the screen awake while the app is active
+  useKeepAwake();
   
   return (
     <SafeAreaProvider style={{ backgroundColor: theme.colors.background }}>
