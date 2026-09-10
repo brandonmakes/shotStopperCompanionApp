@@ -58,6 +58,24 @@ target 'shotStopperCompanion' do
       :ccache_enabled => podfile_properties['apple.ccacheEnabled'] == 'true',
     )
 
+    # Workaround for Xcode 26+ with fmt 11.0.2 (pulled by current RN pods):
+    # disable FMT_USE_CONSTEVAL in fmt/base.h during pod install.
+    fmt_base_header = File.join(installer.sandbox.root.to_s, 'fmt', 'include', 'fmt', 'base.h')
+    if File.exist?(fmt_base_header)
+      content = File.read(fmt_base_header)
+      unless content.include?('Xcode 26 workaround')
+        patched = content.gsub(
+          /^(#elif defined\(__cpp_consteval\)\n#\s*define FMT_USE_CONSTEVAL)\s+1/,
+          "// Xcode 26 workaround: disable consteval\n\\1 0"
+        )
+
+        if patched != content
+          File.chmod(0644, fmt_base_header)
+          File.write(fmt_base_header, patched)
+        end
+      end
+    end
+
     # This is necessary for Xcode 14, because it signs resource bundles by default
     # when building for devices.
     installer.target_installation_results.pod_target_installation_results

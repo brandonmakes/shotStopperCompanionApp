@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import BleManager, { BleScanCallbackType, BleScanMatchMode, BleScanMode, BleState, Peripheral } from 'react-native-ble-manager';
+import BleManager, { BleScanMatchMode, BleScanMode, BleState, Peripheral } from 'react-native-ble-manager';
 import { AppState, AppStateStatus, Platform } from 'react-native';
 import { request, PERMISSIONS, RESULTS, requestMultiple } from 'react-native-permissions';
 
@@ -17,8 +17,12 @@ export enum ScaleStatus {
 }
 
 export const scanDuration = 5;
-const RETRY_BACKOFF_MS = [0, 500, 1000];
-const FRESH_CONNECTION_TIMEOUT_MS = 7000;
+// Android silently returns empty scans past ~5 scan starts per 30s (Samsung
+// enforces this aggressively), so retries must stay well under that rate.
+const RETRY_BACKOFF_MS = [0, 3000, 8000];
+// Samsung phones commonly need 2-5s for connect + service discovery alone,
+// plus a spurious GATT 133 retry, before the characteristic sync even starts.
+const FRESH_CONNECTION_TIMEOUT_MS = 20000;
 
 const serviceUUIDs = ['00000000-0000-0000-0000-000000000ffe', '00002a98-0000-1000-8000-00805f9b34fb'];
 
@@ -79,12 +83,13 @@ const requestBlePermissions = async (): Promise<boolean> => {
         console.log("bluetoothStatus", bluetoothStatus)
         return bluetoothStatus === RESULTS.GRANTED;
     } else if (Platform.OS === 'android') {
-        // For Android 12+ (SDK 31+)
+        // For Android 12+ (SDK 31+). BLUETOOTH_SCAN is declared with
+        // neverForLocation, so location permission (and the system-wide
+        // Location toggle) is not needed for scan results.
         if (Platform.Version >= 31) {
             const results = await requestMultiple([
                 PERMISSIONS.ANDROID.BLUETOOTH_SCAN,
                 PERMISSIONS.ANDROID.BLUETOOTH_CONNECT,
-                PERMISSIONS.ANDROID.ACCESS_FINE_LOCATION,
             ]);
             return Object.values(results).every(result => result === RESULTS.GRANTED);
         } else {
@@ -294,10 +299,13 @@ export const useBLEConnection = () => {
             }
 
             setState(prev => ({ ...prev, connectionPhase: 'scanning' }));
+            // No callbackType: FirstMatch requires hardware offloaded filtering,
+            // which fails or never reports results on many Samsung devices. The
+            // default (AllMatches) works everywhere; duplicates are filtered in
+            // the discover listener.
             await BleManager.scan(serviceUUIDs, scanDuration, false, {
                 matchMode: BleScanMatchMode.Aggressive,
                 scanMode: BleScanMode.LowLatency,
-                callbackType: BleScanCallbackType.FirstMatch,
             });
 
         } catch (error) {
@@ -373,13 +381,15 @@ export const useBLEConnection = () => {
             if (!discoveredDevices.has(peripheral.id)) {
                 discoveredDevices.set(peripheral.id, peripheral);
                 console.log('New device discovered:', peripheral);
-                BleManager.stopScan();
               } else {
                 console.log('Duplicate device ignored:', peripheral.id);
                 return;
             }
             try {
                 isConnecting.current = true;
+                // Connecting while a scan is still active is a classic source of
+                // GATT error 133 on Samsung, so wait for the scan to fully stop.
+                await BleManager.stopScan();
                 await withTimeout(
                     commonConnectionFlow(peripheral, { isConnected: true, isScanning: false, error: null }),
                     FRESH_CONNECTION_TIMEOUT_MS,
@@ -398,7 +408,6 @@ export const useBLEConnection = () => {
                 scheduleRetry('connection error');
             } finally {
                 isConnecting.current = false;
-                await BleManager.stopScan();
             }
         });
 
@@ -440,11 +449,18 @@ export const useBLEConnection = () => {
             scheduleRetry('peripheral disconnected');
         });
 
-        const onStopScanListener = BleManager.onStopScan(() => {
-            console.log("onStopScanListener")
+        const onStopScanListener = BleManager.onStopScan((event: any) => {
+            // Android reports scan failures (throttling, unsupported features,
+            // registration errors) here as a non-zero status, not as a scan()
+            // rejection — don't let them pass silently.
+            const status = event?.status ?? 0;
+            if (status !== 0) {
+                console.warn(`BLE scan failed with status ${status}`);
+            }
+            console.log("onStopScanListener", status)
             setState(prev => ({ ...prev, isScanning: false }));
             if (!state.isConnected && !isConnecting.current) {
-                scheduleRetry('scan stopped without connection');
+                scheduleRetry(`scan stopped without connection (status ${status})`);
             }
         });
 

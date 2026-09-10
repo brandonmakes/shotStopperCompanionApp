@@ -84,16 +84,17 @@ def jscFlavor = 'io.github.react-native-community:jsc-android:2026004.+'
 android {
     ndkVersion rootProject.ext.ndkVersion
 
-    buildToolsVersion rootProject.ext.buildToolsVersion
-    compileSdk rootProject.ext.compileSdkVersion
+    // Explicitly pin SDK levels for Play policy compliance even if root ext values differ.
+    buildToolsVersion "36.0.0"
+    compileSdk 36
 
     namespace 'com.icapurro.shotStopperCompanion'
     defaultConfig {
         applicationId 'com.icapurro.shotStopperCompanion'
         minSdkVersion rootProject.ext.minSdkVersion
-        targetSdkVersion rootProject.ext.targetSdkVersion
+        targetSdkVersion 36
         versionCode 1
-        versionName "1.2.2"
+        versionName "1.3.0"
     }
     signingConfigs {
         debug {
