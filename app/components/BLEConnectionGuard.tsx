@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, StyleSheet, Pressable, Text, TouchableWithoutFeedback } from 'react-native';
+import { View, StyleSheet, Pressable, Text, TouchableWithoutFeedback, Platform } from 'react-native';
 import { View as MView } from 'moti';
 import { Easing } from 'react-native-reanimated';
 import { Feather } from '@expo/vector-icons';
@@ -19,10 +19,16 @@ function Guard({ children }: { children: React.ReactNode }) {
     const colors = theme.colors;
 
     React.useEffect(() => {
-        BleManager.start({ showAlert: false }).then(() => {
-            console.log("BLE Module initialized");
-            connectToDevice();
-        })
+        // On web, automatically enable demo mode for testing
+        if (Platform.OS === 'web') {
+            console.log("Web platform detected, enabling demo mode");
+            demoConnectToDevice();
+        } else {
+            BleManager.start({ showAlert: false }).then(() => {
+                console.log("BLE Module initialized");
+                connectToDevice();
+            });
+        }
     }, [])
 
     if (isScanning || !isConnected) {
