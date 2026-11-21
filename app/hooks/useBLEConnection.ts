@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import BleManager, { BleScanCallbackType, BleScanMatchMode, BleScanMode, BleState, Peripheral } from 'react-native-ble-manager';
+import BleManager, { BleScanMatchMode, BleScanMode, BleState, Peripheral } from 'react-native-ble-manager';
 import { AppState, AppStateStatus, Platform } from 'react-native';
 import { request, PERMISSIONS, RESULTS, requestMultiple } from 'react-native-permissions';
 
@@ -8,6 +8,7 @@ interface BLEConnectionState {
     isScanning: boolean;
     error: string | null;
     bluetoothState: BleState;
+    connectionPhase: ConnectionPhase;
 }
 
 export enum ScaleStatus {
@@ -16,6 +17,12 @@ export enum ScaleStatus {
 }
 
 export const scanDuration = 5;
+// Android silently returns empty scans past ~5 scan starts per 30s (Samsung
+// enforces this aggressively), so retries must stay well under that rate.
+const RETRY_BACKOFF_MS = [0, 3000, 8000];
+// Samsung phones commonly need 2-5s for connect + service discovery alone,
+// plus a spurious GATT 133 retry, before the characteristic sync even starts.
+const FRESH_CONNECTION_TIMEOUT_MS = 20000;
 
 const serviceUUIDs = ['00000000-0000-0000-0000-000000000ffe', '00002a98-0000-1000-8000-00805f9b34fb'];
 
@@ -68,18 +75,21 @@ interface DeviceSettings {
     wifiIp: string;
 }
 
+type ConnectionPhase = 'idle' | 'checking' | 'reconnecting' | 'scanning' | 'connecting' | 'syncing' | 'ready' | 'error';
+
 const requestBlePermissions = async (): Promise<boolean> => {
     if (Platform.OS === 'ios') {
         const bluetoothStatus = await request(PERMISSIONS.IOS.BLUETOOTH);
         console.log("bluetoothStatus", bluetoothStatus)
         return bluetoothStatus === RESULTS.GRANTED;
     } else if (Platform.OS === 'android') {
-        // For Android 12+ (SDK 31+)
+        // For Android 12+ (SDK 31+). BLUETOOTH_SCAN is declared with
+        // neverForLocation, so location permission (and the system-wide
+        // Location toggle) is not needed for scan results.
         if (Platform.Version >= 31) {
             const results = await requestMultiple([
                 PERMISSIONS.ANDROID.BLUETOOTH_SCAN,
                 PERMISSIONS.ANDROID.BLUETOOTH_CONNECT,
-                PERMISSIONS.ANDROID.ACCESS_FINE_LOCATION,
             ]);
             return Object.values(results).every(result => result === RESULTS.GRANTED);
         } else {
@@ -104,12 +114,16 @@ export const useBLEConnection = () => {
     const isConnecting = useRef(false);
     const config = useRef<any>(currentConfig);
     const isDemoMode = useRef(false);
+    const connectionSession = useRef(0);
+    const connectionAttempt = useRef(0);
+    const retryTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
     const [state, setState] = useState<BLEConnectionState>({
         isConnected: false,
         isScanning: false,
         bluetoothState: BleState.On,
-        error: null
+        error: null,
+        connectionPhase: 'idle',
     });
 
     const [settings, setSettings] = useState<DeviceSettings>({
@@ -135,6 +149,73 @@ export const useBLEConnection = () => {
     const delay = (ms: number): Promise<void> => 
         new Promise(resolve => setTimeout(resolve, ms));
 
+    const withTimeout = async <T,>(operation: Promise<T>, timeoutMs: number, message: string): Promise<T> => {
+        let timeoutId: ReturnType<typeof setTimeout> | null = null;
+        try {
+            return await Promise.race([
+                operation,
+                new Promise<T>((_, reject) => {
+                    timeoutId = setTimeout(() => reject(new Error(message)), timeoutMs);
+                }),
+            ]);
+        } finally {
+            if (timeoutId) {
+                clearTimeout(timeoutId);
+            }
+        }
+    };
+
+    const clearRetryTimeout = () => {
+        if (retryTimeoutRef.current) {
+            clearTimeout(retryTimeoutRef.current);
+            retryTimeoutRef.current = null;
+        }
+    };
+
+    const stopConnectionFlow = (phase: ConnectionPhase = 'idle') => {
+        connectionSession.current += 1;
+        connectionAttempt.current = 0;
+        isConnecting.current = false;
+        clearRetryTimeout();
+        setState(prev => ({
+            ...prev,
+            isScanning: false,
+            connectionPhase: phase,
+        }));
+    };
+
+    const scheduleRetry = (reason: string) => {
+        if (state.isConnected) {
+            return;
+        }
+        if (AppState.currentState !== 'active') {
+            console.log('Skipping retry while app is not active');
+            return;
+        }
+        if (state.bluetoothState !== BleState.On) {
+            console.log('Skipping retry while bluetooth is off');
+            return;
+        }
+        const nextAttempt = connectionAttempt.current + 1;
+        if (nextAttempt >= RETRY_BACKOFF_MS.length) {
+            setState(prev => ({
+                ...prev,
+                isScanning: false,
+                isConnected: false,
+                error: 'Could not connect to the espresso device. Tap to retry.',
+                connectionPhase: 'error',
+            }));
+            return;
+        }
+        connectionAttempt.current = nextAttempt;
+        const delayMs = RETRY_BACKOFF_MS[nextAttempt];
+        console.log(`Scheduling BLE retry #${nextAttempt} in ${delayMs}ms due to ${reason}`);
+        clearRetryTimeout();
+        retryTimeoutRef.current = setTimeout(() => {
+            void connectToDevice(true);
+        }, delayMs);
+    };
+
     const demoConnectToDevice = async () => {
         isDemoMode.current = true;
         isConnecting.current = true;
@@ -147,10 +228,16 @@ export const useBLEConnection = () => {
         isConnecting.current = false;
     }
 
-    const connectToDevice = async () => {
+    const connectToDevice = async (isRetry = false) => {
         if (isDemoMode.current) {
             await demoConnectToDevice();
             return;
+        }
+
+        if (!isRetry) {
+            connectionSession.current += 1;
+            connectionAttempt.current = 0;
+            clearRetryTimeout();
         }
 
         if (isConnecting.current) {
@@ -167,36 +254,59 @@ export const useBLEConnection = () => {
             setState(prev => ({ 
                 ...prev, 
                 error: 'Bluetooth permissions not granted', 
-                isScanning: false 
+                isScanning: false,
+                connectionPhase: 'error',
             }));
             return;
         }
         try {
             isConnecting.current = true;
+            const sessionId = connectionSession.current;
             console.log('Initializing BLE scan...');
 
-            setState(prev => ({ ...prev, error: null, isScanning: true }));
+            setState(prev => ({ ...prev, error: null, isScanning: true, connectionPhase: 'checking' }));
 
             const bleState = await BleManager.checkState();
             
             if (bleState !== 'on') {
-                setState(prev => ({ ...prev, error: 'Bluetooth is not enabled', isScanning: false, bluetoothState: bleState }));
+                setState(prev => ({
+                    ...prev,
+                    error: 'Bluetooth is not enabled',
+                    isScanning: false,
+                    bluetoothState: bleState,
+                    connectionPhase: 'error',
+                }));
                 return;
             }
 
-            // Check for existing connections
-            const connectedPeripherals = await BleManager.getConnectedPeripherals([]);
+            // Always start with a clean GATT session on app foreground/start.
+            const connectedPeripherals = await BleManager.getConnectedPeripherals(serviceUUIDs);
             console.log("connectedPeripherals", JSON.stringify(connectedPeripherals))
-            if (connectedPeripherals.length === 1) {
-                console.log("Established connection to previously connected device", connectedPeripherals[0])
-                await commonConnectionFlow(connectedPeripherals[0], { isConnected: true, isScanning: false, error: null, bluetoothState: bleState });
-            } else {
-                await BleManager.scan(serviceUUIDs, scanDuration, false, {
-                    matchMode: BleScanMatchMode.Aggressive,
-                    scanMode: BleScanMode.LowLatency,
-                    callbackType: BleScanCallbackType.FirstMatch,
-                });
+            if (connectedPeripherals.length > 0) {
+                setState(prev => ({ ...prev, connectionPhase: 'reconnecting' }));
+                for (const peripheral of connectedPeripherals) {
+                    try {
+                        await BleManager.disconnect(peripheral.id, true);
+                    } catch (disconnectError) {
+                        console.warn(`Disconnect stale peripheral failed (${peripheral.id}):`, disconnectError);
+                    }
+                }
+                await delay(500);
             }
+
+            if (sessionId !== connectionSession.current) {
+                return;
+            }
+
+            setState(prev => ({ ...prev, connectionPhase: 'scanning' }));
+            // No callbackType: FirstMatch requires hardware offloaded filtering,
+            // which fails or never reports results on many Samsung devices. The
+            // default (AllMatches) works everywhere; duplicates are filtered in
+            // the discover listener.
+            await BleManager.scan(serviceUUIDs, scanDuration, false, {
+                matchMode: BleScanMatchMode.Aggressive,
+                scanMode: BleScanMode.LowLatency,
+            });
 
         } catch (error) {
             console.error('Scan error:', error);
@@ -206,7 +316,9 @@ export const useBLEConnection = () => {
                 error: 'Failed to scan for devices',
                 isScanning: false,
                 isConnected: false,
+                connectionPhase: 'error',
             }));
+            scheduleRetry('scan error');
             setIsLoading(false);
         } finally {
             isConnecting.current = false;
@@ -218,10 +330,11 @@ export const useBLEConnection = () => {
             await BleManager.disconnect(config.current.deviceId);
             config.current = null;
         }
+        stopConnectionFlow();
         setState(prev => ({
             ...prev,
             isConnected: false,
-            isScanning: true,
+            isScanning: false,
         }));
     };
 
@@ -229,22 +342,27 @@ export const useBLEConnection = () => {
         const startTime = new Date();
         const serviceUUID = peripheral.advertising?.serviceUUIDs?.[0] ?? currentConfig.serviceUUID;
         config.current = getConfig(serviceUUID, peripheral.id);
+        setState(prev => ({ ...prev, connectionPhase: 'connecting' }));
         console.log("connecting", elapsedTime(startTime))
         await BleManager.connect(config.current.deviceId);
         console.log("connected", elapsedTime(startTime))
         if (Platform.OS === 'android') {
             await BleManager.requestConnectionPriority(config.current.deviceId, 1);
         }
+        setState(prev => ({ ...prev, connectionPhase: 'syncing' }));
         console.log("retrieving services", elapsedTime(startTime))
         await BleManager.retrieveServices(config.current.deviceId);
         console.log("retrieved services", elapsedTime(startTime))
         const firmwareVersion = await readFirmwareVersion();
         await listenForNotifications(firmwareVersion);
         await readAllSettings(firmwareVersion);
+        clearRetryTimeout();
+        connectionAttempt.current = 0;
         if (state) {
             setState(prev => ({
                 ...prev,
                 ...state,
+                connectionPhase: 'ready',
             }));
         }
         await readBackgroundSettings(firmwareVersion);
@@ -263,19 +381,33 @@ export const useBLEConnection = () => {
             if (!discoveredDevices.has(peripheral.id)) {
                 discoveredDevices.set(peripheral.id, peripheral);
                 console.log('New device discovered:', peripheral);
-                BleManager.stopScan();
               } else {
                 console.log('Duplicate device ignored:', peripheral.id);
                 return;
             }
             try {
                 isConnecting.current = true;
-                await commonConnectionFlow(peripheral, { isConnected: true, isScanning: false, error: null });
+                // Connecting while a scan is still active is a classic source of
+                // GATT error 133 on Samsung, so wait for the scan to fully stop.
+                await BleManager.stopScan();
+                await withTimeout(
+                    commonConnectionFlow(peripheral, { isConnected: true, isScanning: false, error: null }),
+                    FRESH_CONNECTION_TIMEOUT_MS,
+                    'Fresh connection handshake timed out',
+                );
             } catch (error) {
                 console.error('Connection error:', error);
+                config.current = null;
+                setState(prev => ({
+                    ...prev,
+                    isConnected: false,
+                    isScanning: false,
+                    error: 'Could not connect to the espresso device. Tap to retry.',
+                    connectionPhase: 'error',
+                }));
+                scheduleRetry('connection error');
             } finally {
                 isConnecting.current = false;
-                await BleManager.stopScan();
             }
         });
 
@@ -285,10 +417,16 @@ export const useBLEConnection = () => {
                 if (state.bluetoothState !== event.state && (event.state === 'on' || event.state === 'off')) {
                     
                     const shouldDisconnect = state.bluetoothState === BleState.On && state.isConnected && event.state === 'off';
-                    setState(prev => ({ ...prev, bluetoothState: event.state, isConnected: shouldDisconnect ? false : prev.isConnected }));
+                    setState(prev => ({
+                        ...prev,
+                        bluetoothState: event.state,
+                        isConnected: shouldDisconnect ? false : prev.isConnected,
+                    }));
                     if (event.state === 'on') {
                         console.log('Auto-reconnecting...');
                         connectToDevice(); // Auto-reconnect
+                    } else if (event.state === 'off') {
+                        stopConnectionFlow('idle');
                     }
                 }
             } catch (error) {
@@ -306,18 +444,30 @@ export const useBLEConnection = () => {
                 ...prev,
                 isConnected: false,
                 isScanning: false,
+                connectionPhase: 'error',
             }));
+            scheduleRetry('peripheral disconnected');
         });
 
-        const onStopScanListener = BleManager.onStopScan(() => {
-            console.log("onStopScanListener")
+        const onStopScanListener = BleManager.onStopScan((event: any) => {
+            // Android reports scan failures (throttling, unsupported features,
+            // registration errors) here as a non-zero status, not as a scan()
+            // rejection — don't let them pass silently.
+            const status = event?.status ?? 0;
+            if (status !== 0) {
+                console.warn(`BLE scan failed with status ${status}`);
+            }
+            console.log("onStopScanListener", status)
             setState(prev => ({ ...prev, isScanning: false }));
+            if (!state.isConnected && !isConnecting.current) {
+                scheduleRetry(`scan stopped without connection (status ${status})`);
+            }
         });
 
         const onScaleStatusListener = BleManager.onDidUpdateValueForCharacteristic(async (args: any) => {
             const characteristic = args["characteristic"].toLowerCase();
             if (characteristic === config.current.characteristics.SHOT_STATUS.toLowerCase()) {
-                console.log("Notification: shotStatus -", args.value[0] === 1)
+                console.log("Notification: shotStatus -", args.value[0])
                 setSettings(prev => ({ ...prev, shotStatus: args.value[0] === 1 }));
             }
             if (characteristic === config.current.characteristics.SCALE_STATUS.toLowerCase()) {
@@ -353,6 +503,12 @@ export const useBLEConnection = () => {
         });
 
         return () => appStateSubscription.remove();
+    }, []);
+
+    useEffect(() => {
+        return () => {
+            clearRetryTimeout();
+        };
     }, []);
 
     function bytesToString(byteArray: any) {

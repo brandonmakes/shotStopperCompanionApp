@@ -26,8 +26,8 @@ const THEME_STORAGE_KEY = '@theme_override';
 
 export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     const systemColorScheme = useColorScheme();
-    const [themeOverride, setThemeOverrideState] = React.useState<ThemeOverride>('auto');
-    const [isDarkMode, setIsDarkMode] = React.useState(systemColorScheme === 'dark');
+    const [themeOverride, setThemeOverrideState] = React.useState<ThemeOverride>('dark');
+    const [isDarkMode, setIsDarkMode] = React.useState(true);
 
     // Load saved theme override on mount
     React.useEffect(() => {

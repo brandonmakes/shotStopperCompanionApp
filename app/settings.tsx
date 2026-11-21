@@ -383,7 +383,7 @@ const Settings: React.FC = () => {
     return (
         <SafeAreaView style={[styles.container, { backgroundColor: theme.colors.background, paddingTop: insets.top }]}>
             <View style={[styles.topBar, styles.horizontal]}>
-                <Text style={[styles.titleText, {color: theme.colors.text}]}>shotStopper Settings</Text>
+                <Text style={[styles.titleText, {color: theme.colors.text}]}>Settings</Text>
                 {bleLoading ? (
                     <ActivityIndicator size="small" color={theme.colors.text} style={{marginRight: 40, marginTop: 20}} />
                 ) : (
@@ -437,7 +437,7 @@ const Settings: React.FC = () => {
                         <ResetButton />
                     </View>
                 )}
-                <Text style={[styles.paragraph, {color: theme.colors.text, textAlign: 'center', marginBottom: 20}]}>Firmware version: {firmwareVersion}</Text>
+                <Text style={[styles.paragraph, {color: theme.colors.text, textAlign: 'center', marginBottom: 20}]}>Works with shotStopper • Firmware v{firmwareVersion}</Text>
             </ScrollView>
             <DemoMode />
             <OTAWizard isVisible={otaWizardVisible} onClose={() => setOtaWizardVisible(false)} />
@@ -491,7 +491,8 @@ const styles = StyleSheet.create({
     },
     titleText: {
         fontSize: 32,
-        fontFamily: "InstrumentSherif",
+        fontFamily: "InterLight",
+        fontWeight: "300",
         paddingLeft: 20,
         paddingTop: 20,
     },
@@ -523,8 +524,8 @@ const styles = StyleSheet.create({
     },
     themeNumber: {
         fontSize: 40,
-        fontFamily: 'MenloBold',
-        fontWeight: '600',
+        fontFamily: 'InterRegular',
+        fontWeight: '400',
     },
     themeLabel: {
         fontSize: 12,

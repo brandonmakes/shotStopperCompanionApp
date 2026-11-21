@@ -1,8 +1,8 @@
 {
   "expo": {
-    "name": "shotStopperCompanion",
-    "slug": "shotStopperCompanion",
-    "version": "1.2.2",
+    "name": "Extraction",
+    "slug": "extraction",
+    "version": "1.3.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "myapp",
@@ -10,8 +10,7 @@
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
-      "googleServicesFile": "./GoogleService-Info.plist",
-      "bundleIdentifier": "com.icapurro.shotStopperCompanion",
+      "bundleIdentifier": "com.brandonmakes.extraction",
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "This app uses your location to access network information.",
         "NSLocationAlwaysUsageDescription": "This app uses your location to access network information.",
@@ -34,8 +33,7 @@
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#ffffff"
       },
-      "googleServicesFile": "./google-services.json",
-      "package": "com.icapurro.shotStopperCompanion",
+      "package": "com.brandonmakes.extraction",
       "permissions": [
         "android.permission.BLUETOOTH_CONNECT",
         "android.permission.BLUETOOTH_SCAN",
@@ -78,6 +76,7 @@
         {
           "isBackgroundEnabled": true,
           "isBleRequired": true,
+          "neverForLocation": true,
           "modes": [
             "peripheral",
             "central"
@@ -95,13 +94,16 @@
           ]
         }
       ],
-      "@react-native-firebase/app",
-      "@react-native-firebase/crashlytics",
       [
         "expo-build-properties",
         {
           "android": {
-            "usesCleartextTraffic": true
+            "compileSdkVersion": 36,
+            "targetSdkVersion": 36,
+            "buildToolsVersion": "36.0.0",
+            "usesCleartextTraffic": true,
+            "extraProguardRules": "-keep class * { *; }",
+            "enableShrinkResources": false
           },
           "ios": {
             "useFrameworks": "static"
@@ -114,7 +116,8 @@
           "configureAndroidBackup": true,
           "faceIDPermission": "Allow $(PRODUCT_NAME) to access your Face ID biometric data."
         }
-      ]
+      ],
+      "expo-asset"
     ],
     "experiments": {
       "typedRoutes": true
