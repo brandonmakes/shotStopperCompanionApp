@@ -18,7 +18,7 @@ import { useBLEConnectionContext } from './contexts/BLEConnectionContext';
 
 const { width, height } = Dimensions.get("screen");
 
-const HERO_BACKGROUND = "#0a0a0a";
+const HERO_BACKGROUND = "#000000";
 
 export default function App() {
   const { theme } = useThemeContext();
@@ -95,6 +95,11 @@ export default function App() {
     updateWeightValue(nextWeight);
   };
 
+  const handleConnect = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    // Connection management
+  };
+
   const handleSettings = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     router.navigate({ pathname: "/settings" });
@@ -142,6 +147,8 @@ export default function App() {
             style={[styles.actionButton, { opacity: isConnected ? 1 : 0.4 }]}
             onPress={handleToggleEnabled}
             disabled={!isConnected}
+            accessibilityLabel={enabled ? "Disable scale" : "Enable scale"}
+            accessibilityHint="Toggles the scale on or off"
           >
             <Feather 
               name={enabled ? "zap" : "zap-off"} 
@@ -154,6 +161,8 @@ export default function App() {
             style={[styles.actionButton, { opacity: isConnected ? 1 : 0.4 }]}
             onPress={handleAdjustWeight}
             disabled={!isConnected}
+            accessibilityLabel="Adjust weight preset"
+            accessibilityHint="Cycles through common weight presets"
           >
             <Feather name="droplet" size={24} color={colors.white} />
           </TouchableOpacity>
@@ -161,41 +170,40 @@ export default function App() {
           <TouchableOpacity 
             style={styles.actionButton}
             onPress={handleSettings}
+            accessibilityLabel="Settings"
+            accessibilityHint="Opens settings screen"
           >
             <Feather name="settings" size={24} color={colors.white} />
           </TouchableOpacity>
 
           <TouchableOpacity 
-            style={[styles.actionButton, { opacity: 0.4 }]}
-            disabled
+            style={[styles.actionButton, { opacity: isConnected ? 1 : 0.4 }]}
+            onPress={handleConnect}
+            disabled={!isConnected}
+            accessibilityLabel="Connection"
+            accessibilityHint="Manage Bluetooth connection"
           >
-            <Feather name="more-horizontal" size={24} color={colors.white} />
+            <Feather name="bluetooth" size={24} color={colors.white} />
           </TouchableOpacity>
         </View>
 
         {/* Floating pill-shaped bottom navigation */}
         <View style={styles.bottomNav}>
-          <TouchableOpacity style={styles.navButton}>
+          <TouchableOpacity 
+            style={styles.navButton}
+            accessibilityLabel="Home"
+            accessibilityHint="Currently on home screen"
+          >
             <Feather name="home" size={24} color={colors.white} />
           </TouchableOpacity>
           
           <TouchableOpacity 
             style={styles.navButton}
             onPress={() => router.navigate({ pathname: "/settings" })}
+            accessibilityLabel="Settings"
+            accessibilityHint="Navigate to settings"
           >
-            <Feather name="map-pin" size={24} color={colors.white} opacity={0.5} />
-          </TouchableOpacity>
-          
-          <TouchableOpacity style={styles.navButton}>
-            <Feather name="coffee" size={24} color={colors.white} opacity={0.5} />
-          </TouchableOpacity>
-          
-          <TouchableOpacity style={styles.navButton}>
-            <Feather name="message-circle" size={24} color={colors.white} opacity={0.5} />
-          </TouchableOpacity>
-          
-          <TouchableOpacity style={styles.navButton}>
-            <Feather name="user" size={24} color={colors.white} opacity={0.5} />
+            <Feather name="sliders" size={24} color={colors.white} opacity={0.5} />
           </TouchableOpacity>
         </View>
       </View>
@@ -269,15 +277,16 @@ const styles = StyleSheet.create({
   bottomNav: {
     position: 'absolute',
     bottom: 20,
-    left: 24,
-    right: 24,
-    height: 72,
+    left: '50%',
+    transform: [{ translateX: -80 }],
+    width: 160,
+    height: 64,
     backgroundColor: 'rgba(30, 30, 30, 0.95)',
-    borderRadius: 36,
+    borderRadius: 32,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-around',
-    paddingHorizontal: 20,
+    paddingHorizontal: 16,
     ...Platform.select({
       ios: {
         shadowColor: '#000',
